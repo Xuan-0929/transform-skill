@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "persona-skill-distill"
+version = "0.1.0"
+description = "Persona-to-skill distillation framework with incremental updates and evaluation gates"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Persona Distill Team" }
+]
+dependencies = [
+  "typer>=0.12.3",
+  "pydantic>=2.8.2",
+  "pyyaml>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.2",
+]
+
+[project.scripts]
+distill = "persona_distill.cli:app"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = "-q"
