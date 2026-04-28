@@ -24,6 +24,19 @@ DISTILL_NEW_WEIGHT_VALUE="${DISTILL_NEW_CORPUS_WEIGHT:-}"
 # an unrelated globally installed `distill` executable.
 CLI=(python3 -m persona_distill)
 
+if ! command -v claude >/dev/null 2>&1; then
+  echo "Claude CLI not found. Install Claude Code CLI first." >&2
+  exit 2
+fi
+
+if [[ "${DISTILL_SKIP_CLAUDE_AUTH_CHECK:-0}" != "1" ]]; then
+  AUTH_STATUS="$(claude auth status 2>/dev/null || true)"
+  if [[ "$AUTH_STATUS" != *'"loggedIn": true'* ]]; then
+    echo "Claude CLI is not logged in. Run: claude auth login" >&2
+    exit 2
+  fi
+fi
+
 CMD=("${CLI[@]}" run --input "$INPUT_PATH" --format "$DISTILL_FORMAT_VALUE" --target "$DISTILL_TARGET_VALUE")
 
 if [[ -n "$PERSONA_ID" ]]; then

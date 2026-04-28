@@ -7,7 +7,12 @@ import typer
 
 from .evaluation import compare_eval, load_benchmark
 from .holdout import evaluate_multi_ref_holdout
-from .providers import build_provider, resolve_runtime_spec
+from .providers import (
+    ClaudeCodeAuthError,
+    ClaudeCodeProviderError,
+    build_provider,
+    resolve_runtime_spec,
+)
 from .repository import PersonaRepository
 from .utils import canonical_skill_name
 from .workflow import (
@@ -20,6 +25,18 @@ from .workflow import (
 )
 
 app = typer.Typer(help="Persona-to-skill distillation framework")
+
+
+def _provider_guard(fn):
+    try:
+        return fn()
+    except ClaudeCodeAuthError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        typer.secho("Hint: run `claude auth login` and retry.", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(code=2)
+    except ClaudeCodeProviderError as exc:
+        typer.secho(f"Claude runtime error: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=2)
 
 
 def _repo() -> PersonaRepository:
@@ -63,13 +80,16 @@ def build(
     suite: Path | None = typer.Option(None, "--suite", help="Eval suite JSON path"),
 ) -> None:
     """Build a new distilled skill version from current corpus."""
-    repo = _repo()
-    result = build_persona(
-        repo,
-        persona,
-        eval_suite=suite.resolve() if suite else None,
-    )
-    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    def _run() -> None:
+        repo = _repo()
+        result = build_persona(
+            repo,
+            persona,
+            eval_suite=suite.resolve() if suite else None,
+        )
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+    _provider_guard(_run)
 
 
 @app.command("run")
@@ -96,36 +116,39 @@ def run_cmd(
     if target not in {"agentskills", "codex", "both", "none"}:
         raise typer.BadParameter("--target must be agentskills|codex|both|none")
 
-    repo = _repo()
-    resolved_input = input_path.resolve()
-    persona_id = (persona or _derive_persona_id(resolved_input)).strip()
+    def _run() -> None:
+        repo = _repo()
+        resolved_input = input_path.resolve()
+        persona_id = (persona or _derive_persona_id(resolved_input)).strip()
 
-    created = False
-    if not repo.has_persona(persona_id):
-        repo.init_persona(persona_id)
-        created = True
+        created = False
+        if not repo.has_persona(persona_id):
+            repo.init_persona(persona_id)
+            created = True
 
-    result = update_persona(
-        repo=repo,
-        persona_id=persona_id,
-        eval_suite=suite.resolve() if suite else None,
-        input_path=resolved_input,
-        fmt=fmt,
-        speaker_filter=speaker,
-        correction=None,
-        correction_section="beliefs_and_values",
-        new_corpus_weight=new_corpus_weight,
-    )
+        result = update_persona(
+            repo=repo,
+            persona_id=persona_id,
+            eval_suite=suite.resolve() if suite else None,
+            input_path=resolved_input,
+            fmt=fmt,
+            speaker_filter=speaker,
+            correction=None,
+            correction_section="beliefs_and_values",
+            new_corpus_weight=new_corpus_weight,
+        )
 
-    payload: dict[str, object] = {
-        "persona": persona_id,
-        "input": str(resolved_input),
-        "created": created,
-        **result,
-    }
-    if target != "none":
-        payload["export"] = export_persona(repo, persona_id, target=target, version=result["version"])
-    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        payload: dict[str, object] = {
+            "persona": persona_id,
+            "input": str(resolved_input),
+            "created": created,
+            **result,
+        }
+        if target != "none":
+            payload["export"] = export_persona(repo, persona_id, target=target, version=result["version"])
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    _provider_guard(_run)
 
 
 @app.command("eval")
@@ -135,22 +158,25 @@ def eval_cmd(
     version: str | None = typer.Option(None, "--version", help="Target version, defaults to current"),
 ) -> None:
     """Run benchmark comparison (with_skill vs baseline) for a version."""
-    repo = _repo()
-    state = repo.load_state(persona)
-    resolved_version = version or state.current_version
-    if not resolved_version:
-        raise typer.BadParameter("No version found. Build at least one version first.")
+    def _run() -> None:
+        repo = _repo()
+        state = repo.load_state(persona)
+        resolved_version = version or state.current_version
+        if not resolved_version:
+            raise typer.BadParameter("No version found. Build at least one version first.")
 
-    profile = repo.load_profile(persona, resolved_version)
-    provider = build_provider()
-    benchmark = load_benchmark(suite.resolve())
-    previous_rate = None
-    if state.stable_version:
-        prev_eval = repo.load_eval(persona, state.stable_version)
-        previous_rate = prev_eval.with_skill.pass_rate if prev_eval else None
+        profile = repo.load_profile(persona, resolved_version)
+        provider = build_provider()
+        benchmark = load_benchmark(suite.resolve())
+        previous_rate = None
+        if state.stable_version:
+            prev_eval = repo.load_eval(persona, state.stable_version)
+            previous_rate = prev_eval.with_skill.pass_rate if prev_eval else None
 
-    comparison = compare_eval(benchmark, profile, provider, previous_stable_pass_rate=previous_rate)
-    typer.echo(comparison.model_dump_json(indent=2))
+        comparison = compare_eval(benchmark, profile, provider, previous_stable_pass_rate=previous_rate)
+        typer.echo(comparison.model_dump_json(indent=2))
+
+    _provider_guard(_run)
 
 
 @app.command("eval-holdout")
@@ -170,28 +196,31 @@ def eval_holdout_cmd(
     ),
 ) -> None:
     """Evaluate holdout similarity using multi-reference acceptable replies."""
-    repo = _repo()
-    state = repo.load_state(persona)
-    resolved_version = version or state.current_version
-    if not resolved_version:
-        raise typer.BadParameter("No version found. Build at least one version first.")
-    profile = repo.load_profile(persona, resolved_version)
-    provider = build_provider()
-    target_speaker = speaker or persona
-    report = evaluate_multi_ref_holdout(
-        profile=profile,
-        provider=provider,
-        holdout_path=input_path.resolve(),
-        target_speaker=target_speaker,
-        max_cases=max_cases,
-        min_refs=min_refs,
-        min_avg_similarity=min_avg_similarity,
-        min_delta_vs_baseline=min_delta,
-    )
-    report_path = repo.version_dir(persona, resolved_version) / output_name
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    payload = {"version": resolved_version, "report_path": str(report_path), **report}
-    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    def _run() -> None:
+        repo = _repo()
+        state = repo.load_state(persona)
+        resolved_version = version or state.current_version
+        if not resolved_version:
+            raise typer.BadParameter("No version found. Build at least one version first.")
+        profile = repo.load_profile(persona, resolved_version)
+        provider = build_provider()
+        target_speaker = speaker or persona
+        report = evaluate_multi_ref_holdout(
+            profile=profile,
+            provider=provider,
+            holdout_path=input_path.resolve(),
+            target_speaker=target_speaker,
+            max_cases=max_cases,
+            min_refs=min_refs,
+            min_avg_similarity=min_avg_similarity,
+            min_delta_vs_baseline=min_delta,
+        )
+        report_path = repo.version_dir(persona, resolved_version) / output_name
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload = {"version": resolved_version, "report_path": str(report_path), **report}
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    _provider_guard(_run)
 
 
 @app.command()
@@ -217,21 +246,24 @@ def update(
     if input_path is None and not correction:
         raise typer.BadParameter("Provide --input and/or --correction for update.")
 
-    repo = _repo()
-    resolved_input = input_path.resolve() if input_path else None
-    resolved_suite = suite.resolve() if suite else None
-    result = update_persona(
-        repo=repo,
-        persona_id=persona,
-        eval_suite=resolved_suite,
-        input_path=resolved_input,
-        fmt=fmt,
-        speaker_filter=speaker,
-        correction=correction,
-        correction_section=correction_section,
-        new_corpus_weight=new_corpus_weight,
-    )
-    typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+    def _run() -> None:
+        repo = _repo()
+        resolved_input = input_path.resolve() if input_path else None
+        resolved_suite = suite.resolve() if suite else None
+        result = update_persona(
+            repo=repo,
+            persona_id=persona,
+            eval_suite=resolved_suite,
+            input_path=resolved_input,
+            fmt=fmt,
+            speaker_filter=speaker,
+            correction=correction,
+            correction_section=correction_section,
+            new_corpus_weight=new_corpus_weight,
+        )
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+    _provider_guard(_run)
 
 
 @app.command()
@@ -254,7 +286,8 @@ def doctor_cmd() -> None:
         "runtime_mode": resolved,
         "single_path": True,
         "hints": [
-            "Distillation is skill-runtime only: no local heuristic switch and no API config path.",
+            "Distillation is Claude Code runtime only: no local heuristic switch and no API config path.",
+            "Make sure local Claude CLI is authenticated: `claude auth login`.",
             "Run with `distill run --input <path> --target both` to generate/export artifacts.",
         ],
     }

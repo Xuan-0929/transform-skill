@@ -8,12 +8,15 @@ description: Distill conversation corpora into a complete skill package by provi
 ## Workflow
 
 1. Confirm the corpus file path exists and is readable.
-2. Resolve project root:
+2. Confirm Claude Code CLI runtime is ready:
+   - `claude --version` works
+   - `claude auth status` shows `"loggedIn": true`
+3. Resolve project root:
    - Prefer `DISTILL_PROJECT_ROOT` when set.
    - Otherwise run from the current directory if it contains `pyproject.toml` and `src/persona_distill`.
-3. Run one-shot distillation:
+4. Run one-shot distillation:
    - `distill run --input <path> --target both`
-4. Return the generated version, status, and exported output paths from CLI JSON.
+5. Return the generated version, status, and exported output paths from CLI JSON.
 
 ## Command Contract
 
@@ -27,6 +30,7 @@ description: Distill conversation corpora into a complete skill package by provi
   - `DISTILL_FORMAT` (default `auto`)
   - `DISTILL_NEW_CORPUS_WEIGHT` (optional, `0.0-1.0`, lower means stronger persona preservation)
   - `DISTILL_EVAL_SUITE` (optional)
+  - `DISTILL_SKIP_CLAUDE_AUTH_CHECK` (optional, test-only; set `1` to skip login precheck)
 
 ## Output Requirements
 
@@ -38,3 +42,8 @@ description: Distill conversation corpora into a complete skill package by provi
    - `output_dir`
    - `export.exports.agentskills` and `export.exports.codex` when present
 3. If validation or gates fail, still report the new version and quarantine status.
+
+## User Invocation Examples
+
+- `请使用 distill-from-corpus-path，把 /absolute/path/chat.json 蒸馏成 skill`
+- `请使用 distill-from-corpus-path，语料路径 /absolute/path/new_chat.json，persona 是 laojin，新语料权重 0.2`
