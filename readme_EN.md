@@ -2,72 +2,76 @@
 
 [中文版](./README.md) | [English](./readme_EN.md) | [日本語](./readme_JP.md)
 
-Your distilled buddy got dumped and now talks like a different person?  
-Your bro picked up new catchphrases and you want to refresh the skill?
+Distilled friend changed overnight after a breakup?
+Your buddy got new catchphrases and now the skill feels outdated?
 
-Welcome to `transform.skill`: the core path is not "build from zero every time", but "continuously update an existing skill with new corpus without destroying persona continuity."
+`transform.skill` is update-first:
+- Primary: update an existing skill with new corpus
+- Optional: cold-start distillation from scratch
 
-## What this project does
-- Incrementally update an existing skill (primary path)
-- Distill from scratch (optional path)
-- Control how much the new corpus influences persona (`new-corpus-weight`)
-- Export artifacts for Agent Skills / Codex consumers
-- Single runtime path (no provider switching)
+## Install
+```bash
+git clone https://github.com/Xuan-0929/transform.skill.git
+cd transform.skill
+```
 
-## First things first
-Yes, this is a **real skill-style project**, not just Python scripts.
+Optional (if you work across folders often):
+```bash
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+```
 
-How to tell:
-- Dedicated skill contract: `skills/distill-from-corpus-path/SKILL.md`
-- Skill entry runner: `skills/distill-from-corpus-path/scripts/run_distill_from_path.sh`
-- Runtime precheck for Claude CLI (`claude --version`, `claude auth status`)
-- Accepts corpus path as first input and runs end-to-end distillation
+## Quickstart (Nuwa / colleague.skill style)
+### 1) Prepare corpus folders
+```bash
+mkdir -p corpus/bootstrap corpus/incoming
+```
 
-## Skill mode quickstart (recommended)
-### 0) Prerequisite
+Recommended:
+- `corpus/bootstrap/`: first-time seed corpus
+- `corpus/incoming/`: incremental update corpus
+
+### 2) Login Claude runtime (once)
 ```bash
 claude auth login
 ```
 
-### 1) Primary path: update existing skill
-Examples:
-- `Use distill-from-corpus-path to update persona=laojin with /absolute/path/new_chat.json, new-corpus-weight=0.2`
-- `Use distill-from-corpus-path and continue evolving my existing skill from /absolute/path/week2.json`
-
-### 2) Or run the skill entry script (update mode)
-```bash
-DISTILL_NEW_CORPUS_WEIGHT=0.2 \
-./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /absolute/path/new_chat.json laojin
+### 3) Tell Claude Code directly (recommended)
+```text
+Use distill-from-corpus-path to update persona=laojin with ./corpus/incoming/week2.json and new-corpus-weight=0.2
 ```
 
-Optional:
-- Cold start from scratch: `./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/bootstrap_chat.json laojin`
-- With speaker filter: `./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/new_chat.json laojin Ajin`
+Optional cold-start:
+```text
+Use distill-from-corpus-path to cold-start persona=laojin from ./corpus/bootstrap/day0.json
+```
+
+### 4) Direct command mode (optional)
+```bash
+DISTILL_NEW_CORPUS_WEIGHT=0.2 \
+./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh \
+./corpus/incoming/week2.json \
+laojin
+```
+
+## Output locations
+- Version skill: `.distill/personas/<persona>/versions/<version>/skill/`
+- Agent Skills export: `.distill/personas/<persona>/exports/<version>/agentskills/`
+- Codex export: `.distill/personas/<persona>/exports/<version>/codex/`
 
 ## Weight guide
 - `0.1-0.3`: conservative, preserve old persona
 - `0.4-0.6`: balanced blend
-- `0.7-1.0`: aggressive adoption of new traits
+- `0.7-1.0`: stronger adoption of new traits
 
-In short: lower = safer, higher = bolder.
-
-## Developer mode (optional)
-If you are maintaining/extending this project, use Python commands:
+## Common errors
+- `Claude CLI not found`: install Claude Code CLI first
+- `Claude CLI is not logged in`: run `claude auth login`
+- `Error: claude native binary not installed`: reinstall CLI or run native installer:
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-PYTHONPATH=src python -m persona_distill doctor
-PYTHONPATH=src python -m persona_distill run --input ./your_corpus.json --target both
+npm install -g @anthropic-ai/claude-code
+node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 ```
-
-## FAQ
-### What is the real focus of this project?
-Continuous **skill evolution by new corpus updates**.  
-Cold-start distillation is available, but secondary.
-
-### Why do Python commands still exist if this is a skill project?
-Two audiences:
-- Skill users: path in, skill out
-- Maintainers: local debugging and development workflows
+- `Cannot locate persona-distill project root`: run at repo root or set:
+```bash
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+```

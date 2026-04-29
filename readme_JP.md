@@ -2,72 +2,76 @@
 
 [中文版](./README.md) | [English](./readme_EN.md) | [日本語](./readme_JP.md)
 
-蒸留した友だち、失恋して急に人格変わった？  
-口ぐせが増えて、skill を更新したくなった？
+蒸留した友だち、失恋して急に人格が変わった？
+口ぐせが増えて、既存 skill を更新したくなった？
 
-`transform.skill` の主眼は「毎回ゼロから作ること」ではなく、「既存 skill を新しいコーパスで継続更新すること」です。
+`transform.skill` は update-first です。
+- 主ルート：既存 skill を新規コーパスで継続更新
+- 任意ルート：ゼロからコールドスタート蒸留
 
-## できること
-- 既存 skill の段階的アップデート（主ルート）
-- ゼロから蒸留（オプション）
-- `new-corpus-weight` で新語料の影響度を調整
-- Agent Skills / Codex 向けに出力
-- プロバイダ切替なしの単一路線実行
+## インストール
+```bash
+git clone https://github.com/Xuan-0929/transform.skill.git
+cd transform.skill
+```
 
-## 先に結論
-はい、これは **skill 形式** です。Python スクリプト集だけではありません。
+任意（複数ディレクトリで使う場合）：
+```bash
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+```
 
-判断ポイント：
-- skill 契約ファイル: `skills/distill-from-corpus-path/SKILL.md`
-- skill 実行入口: `skills/distill-from-corpus-path/scripts/run_distill_from_path.sh`
-- Claude 実行時プリチェックあり（`claude --version`, `claude auth status`）
-- コーパスのパスを渡せば蒸留を一気通貫で実行
+## クイックスタート（Nuwa / colleague.skill 風）
+### 1) コーパスフォルダを準備
+```bash
+mkdir -p corpus/bootstrap corpus/incoming
+```
 
-## Skill モード クイックスタート（推奨）
-### 0) 前提
+推奨配置：
+- `corpus/bootstrap/`：初回蒸留
+- `corpus/incoming/`：増分更新
+
+### 2) Claude ランタイムにログイン（初回のみ）
 ```bash
 claude auth login
 ```
 
-### 1) 主ルート：既存 skill を更新
-例：
-- `distill-from-corpus-path を使って /absolute/path/new_chat.json で persona=laojin を更新、weight=0.2`
-- `distill-from-corpus-path を使って既存 skill を /absolute/path/week2.json で継続更新して`
+### 3) Claude Code にそのまま指示（推奨）
+```text
+distill-from-corpus-path を使って ./corpus/incoming/week2.json で persona=laojin を更新、new-corpus-weight=0.2
+```
 
-### 2) もしくは skill 入口スクリプトを実行（更新モード）
+任意（コールドスタート）：
+```text
+distill-from-corpus-path を使って ./corpus/bootstrap/day0.json から persona=laojin を初回蒸留
+```
+
+### 4) 直接コマンド実行（任意）
 ```bash
 DISTILL_NEW_CORPUS_WEIGHT=0.2 \
-./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /absolute/path/new_chat.json laojin
+./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh \
+./corpus/incoming/week2.json \
+laojin
 ```
 
-オプション：
-- コールドスタート（ゼロ蒸留）: `./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/bootstrap_chat.json laojin`
-- speaker 指定: `./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/new_chat.json laojin Ajin`
+## 出力先
+- バージョン skill：`.distill/personas/<persona>/versions/<version>/skill/`
+- Agent Skills export：`.distill/personas/<persona>/exports/<version>/agentskills/`
+- Codex export：`.distill/personas/<persona>/exports/<version>/codex/`
 
 ## 重みの目安
-- `0.1-0.3`: 保守的（旧人格を強く保持）
-- `0.4-0.6`: バランス型
-- `0.7-1.0`: 新特性を強く反映
+- `0.1-0.3`：保守的（旧人格を強く保持）
+- `0.4-0.6`：バランス型
+- `0.7-1.0`：新特性を積極反映
 
-一言で言うと、低いほど保守・高いほど攻め。
-
-## 開発者モード（任意）
-メンテナ向けのローカル実行：
+## よくあるエラー
+- `Claude CLI not found`：Claude Code CLI を先に導入
+- `Claude CLI is not logged in`：`claude auth login`
+- `Error: claude native binary not installed`：CLI を再インストール、または native installer を実行
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-PYTHONPATH=src python -m persona_distill doctor
-PYTHONPATH=src python -m persona_distill run --input ./your_corpus.json --target both
+npm install -g @anthropic-ai/claude-code
+node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 ```
-
-## FAQ
-### このプロジェクトの重点は？
-重点は **新語料による既存 skill の継続進化** です。  
-ゼロ蒸留は補助的な入口です。
-
-### skill なのに Python コマンドが残っているのはなぜ？
-対象が2種類あるためです：
-- skill 利用者：パスを渡して蒸留するだけ
-- 保守者：デバッグ・実装変更・検証のために Python 実行が必要
+- `Cannot locate persona-distill project root`：リポジトリルートで実行、または以下設定
+```bash
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+```

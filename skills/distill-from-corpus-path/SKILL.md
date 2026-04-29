@@ -1,6 +1,6 @@
 ---
 name: distill-from-corpus-path
-description: Distill conversation corpora into a complete skill package by providing only a corpus file path. Use this skill when the user wants to run persona distillation in Claude Code or Codex with minimal steps, including no manual init/ingest/build/export sequence and no model-provider switching.
+description: Update an existing skill with new corpus by only providing a corpus path (update-first), with optional cold-start distillation from scratch. Use this skill when the user wants Claude Code or Codex to evolve persona skills without manual init/ingest/build/export steps.
 ---
 
 # Distill From Corpus Path
@@ -14,9 +14,11 @@ description: Distill conversation corpora into a complete skill package by provi
 3. Resolve project root:
    - Prefer `DISTILL_PROJECT_ROOT` when set.
    - Otherwise run from the current directory if it contains `pyproject.toml` and `src/persona_distill`.
-4. Run one-shot distillation:
+4. Primary path: update existing persona skill with new corpus (update-first):
+   - `distill run --input <path> --persona <existing_persona> --new-corpus-weight <0.0-1.0> --target both`
+5. Optional path: cold-start distillation when no persona exists yet:
    - `distill run --input <path> --target both`
-5. Return the generated version, status, and exported output paths from CLI JSON.
+6. Return the generated version, status, and exported output paths from CLI JSON.
 
 ## Command Contract
 
@@ -42,8 +44,9 @@ description: Distill conversation corpora into a complete skill package by provi
    - `output_dir`
    - `export.exports.agentskills` and `export.exports.codex` when present
 3. If validation or gates fail, still report the new version and quarantine status.
+4. Emphasize update-first flow in user-facing explanation; mention cold-start only as optional.
 
 ## User Invocation Examples
 
-- `请使用 distill-from-corpus-path，把 /absolute/path/chat.json 蒸馏成 skill`
-- `请使用 distill-from-corpus-path，语料路径 /absolute/path/new_chat.json，persona 是 laojin，新语料权重 0.2`
+- `请使用 distill-from-corpus-path，把 /absolute/path/new_chat.json 更新到 persona=laojin，新语料权重 0.2`
+- `请使用 distill-from-corpus-path，用 /absolute/path/bootstrap_chat.json 冷启动蒸馏 persona=laojin（可选）`
