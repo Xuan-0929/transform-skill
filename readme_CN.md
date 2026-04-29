@@ -1,4 +1,4 @@
-# transform.skill（中文说明页）
+# transform-skill（中文说明页）
 
 [中文版入口](./README.md) | [English](./readme_EN.md) | [日本語](./readme_JP.md)
 
@@ -6,8 +6,8 @@
 
 ## 安装
 ```bash
-git clone https://github.com/Xuan-0929/transform.skill.git
-cd transform.skill
+git clone https://github.com/Xuan-0929/transform-skill.git
+cd transform-skill
 ```
 
 ## 30秒快速启动

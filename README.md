@@ -1,11 +1,11 @@
-# transform.skill
+# transform-skill
 
 [中文版](./README.md) | [English](./readme_EN.md) | [日本語](./readme_JP.md)
 
 蒸馏过的朋友突然分手，性情大变？
 兄弟的口头禅又变了，想更新 skill？
 
-`transform.skill` 的核心目标是：
+`transform-skill` 的核心目标是：
 - 主路径：用新增语料持续更新已有 skill
 - 可选路径：从 0 开始冷启动蒸馏
 
@@ -17,13 +17,13 @@
 
 ## 安装
 ```bash
-git clone https://github.com/Xuan-0929/transform.skill.git
-cd transform.skill
+git clone https://github.com/Xuan-0929/transform-skill.git
+cd transform-skill
 ```
 
 如果你经常跨目录使用，建议固定项目根目录（可选）：
 ```bash
-export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform-skill
 ```
 
 ## 快速启动（Nuwa / 同事.skill 风格）
@@ -104,7 +104,7 @@ node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 ```
 - `Cannot locate persona-distill project root`：你不在仓库根目录，或者要先设置：
 ```bash
-export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform-skill
 ```
 
 ## 开发者模式（仅在你要改代码时）
@@ -117,4 +117,4 @@ PYTHONPATH=src python -m persona_distill doctor
 ```
 
 ## 一句话结尾
-`transform.skill` 不是“每次重来”，而是“先有基线，再用新语料持续进化”。
+`transform-skill` 不是“每次重来”，而是“先有基线，再用新语料持续进化”。

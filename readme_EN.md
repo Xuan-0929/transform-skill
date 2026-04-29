@@ -1,23 +1,23 @@
-# transform.skill
+# transform-skill
 
 [中文版](./README.md) | [English](./readme_EN.md) | [日本語](./readme_JP.md)
 
 Distilled friend changed overnight after a breakup?
 Your buddy got new catchphrases and now the skill feels outdated?
 
-`transform.skill` is update-first:
+`transform-skill` is update-first:
 - Primary: update an existing skill with new corpus
 - Optional: cold-start distillation from scratch
 
 ## Install
 ```bash
-git clone https://github.com/Xuan-0929/transform.skill.git
-cd transform.skill
+git clone https://github.com/Xuan-0929/transform-skill.git
+cd transform-skill
 ```
 
 Optional (if you work across folders often):
 ```bash
-export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform-skill
 ```
 
 ## Quickstart (Nuwa / colleague.skill style)
@@ -75,5 +75,5 @@ node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 ```
 - `Cannot locate persona-distill project root`: run at repo root or set:
 ```bash
-export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform-skill
 ```

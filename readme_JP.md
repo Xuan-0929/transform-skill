@@ -1,23 +1,23 @@
-# transform.skill
+# transform-skill
 
 [中文版](./README.md) | [English](./readme_EN.md) | [日本語](./readme_JP.md)
 
 蒸留した友だち、失恋して急に人格が変わった？
 口ぐせが増えて、既存 skill を更新したくなった？
 
-`transform.skill` は update-first です。
+`transform-skill` は update-first です。
 - 主ルート：既存 skill を新規コーパスで継続更新
 - 任意ルート：ゼロからコールドスタート蒸留
 
 ## インストール
 ```bash
-git clone https://github.com/Xuan-0929/transform.skill.git
-cd transform.skill
+git clone https://github.com/Xuan-0929/transform-skill.git
+cd transform-skill
 ```
 
 任意（複数ディレクトリで使う場合）：
 ```bash
-export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform-skill
 ```
 
 ## クイックスタート（Nuwa / colleague.skill 風）
@@ -75,5 +75,5 @@ node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 ```
 - `Cannot locate persona-distill project root`：リポジトリルートで実行、または以下設定
 ```bash
-export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
+export DISTILL_PROJECT_ROOT=/absolute/path/to/transform-skill
 ```
