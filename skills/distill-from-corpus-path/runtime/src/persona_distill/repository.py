@@ -16,6 +16,17 @@ class PersonaRepository:
     def persona_dir(self, persona_id: str) -> Path:
         return self.base_dir / persona_id
 
+    def list_personas(self) -> list[str]:
+        if not self.base_dir.exists():
+            return []
+        personas: list[str] = []
+        for item in self.base_dir.iterdir():
+            if not item.is_dir():
+                continue
+            if (item / "state.json").exists():
+                personas.append(item.name)
+        return sorted(personas)
+
     def _state_path(self, persona_id: str) -> Path:
         return self.persona_dir(persona_id) / "state.json"
 
@@ -172,3 +183,22 @@ class PersonaRepository:
         enriched = {"created_at": utc_now().isoformat(), **payload}
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(enriched, ensure_ascii=False) + "\n")
+
+    def load_audit_events(self, persona_id: str, limit: int | None = None) -> list[dict]:
+        path = self.persona_dir(persona_id) / "audit" / "events.jsonl"
+        if not path.exists():
+            return []
+        events: list[dict] = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(row, dict):
+                events.append(row)
+        if limit is not None and limit > 0:
+            return events[-limit:]
+        return events

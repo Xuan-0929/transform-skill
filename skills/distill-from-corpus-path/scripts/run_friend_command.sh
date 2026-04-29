@@ -2,13 +2,14 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: run_agent_orchestrated.sh <corpus_path> [persona_id] [speaker]" >&2
+  echo "Usage: run_friend_command.sh <intent> [corpus_path] [persona_id]" >&2
+  echo "Example: run_friend_command.sh friend-update ./corpus/new.json laojin" >&2
   exit 1
 fi
 
-INPUT_PATH="$1"
-PERSONA_ID="${2:-}"
-SPEAKER_FILTER="${3:-}"
+INTENT="$1"
+INPUT_PATH="${2:-}"
+PERSONA_ID="${3:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -66,18 +67,20 @@ fi
 
 DISTILL_TARGET_VALUE="${DISTILL_EXPORT_TARGET:-both}"
 DISTILL_FORMAT_VALUE="${DISTILL_FORMAT:-auto}"
-DISTILL_NEW_WEIGHT_VALUE="${DISTILL_NEW_CORPUS_WEIGHT:-}"
+DISTILL_NEW_WEIGHT_VALUE="${DISTILL_NEW_CORPUS_WEIGHT:-0.25}"
+DISTILL_HISTORY_LIMIT_VALUE="${DISTILL_HISTORY_LIMIT:-20}"
 
-if ! command -v claude >/dev/null 2>&1; then
-  echo "Claude CLI not found. Install Claude Code CLI first." >&2
-  exit 2
-fi
-
-if [[ "${DISTILL_PRECHECK_CLAUDE_AUTH:-0}" == "1" && "${DISTILL_SKIP_CLAUDE_AUTH_CHECK:-0}" != "1" ]]; then
-  AUTH_STATUS="$(claude auth status 2>/dev/null || true)"
-  if [[ "$AUTH_STATUS" != *'"loggedIn": true'* ]]; then
-    echo "Claude CLI is not logged in. Run: claude auth login" >&2
+if [[ "$INTENT" == "friend-create" || "$INTENT" == "friend-update" || "$INTENT" == "create-friend" || "$INTENT" == "update-friend" ]]; then
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "Claude CLI not found. Install Claude Code CLI first." >&2
     exit 2
+  fi
+  if [[ "${DISTILL_PRECHECK_CLAUDE_AUTH:-0}" == "1" && "${DISTILL_SKIP_CLAUDE_AUTH_CHECK:-0}" != "1" ]]; then
+    AUTH_STATUS="$(claude auth status 2>/dev/null || true)"
+    if [[ "$AUTH_STATUS" != *'"loggedIn": true'* ]]; then
+      echo "Claude CLI is not logged in. Run: claude auth login" >&2
+      exit 2
+    fi
   fi
 fi
 
@@ -114,22 +117,41 @@ ERR
   fi
 fi
 
-CMD=("$PYTHON_BIN" -m persona_distill orchestrate --input "$INPUT_PATH" --format "$DISTILL_FORMAT_VALUE" --target "$DISTILL_TARGET_VALUE")
+CMD=(
+  "$PYTHON_BIN" -m persona_distill friend
+  --intent "$INTENT"
+  --format "$DISTILL_FORMAT_VALUE"
+  --target "$DISTILL_TARGET_VALUE"
+  --new-corpus-weight "$DISTILL_NEW_WEIGHT_VALUE"
+  --history-limit "$DISTILL_HISTORY_LIMIT_VALUE"
+)
+
+if [[ -n "$INPUT_PATH" ]]; then
+  CMD+=(--input "$INPUT_PATH")
+fi
 
 if [[ -n "$PERSONA_ID" ]]; then
   CMD+=(--persona "$PERSONA_ID")
 fi
 
-if [[ -n "$SPEAKER_FILTER" ]]; then
-  CMD+=(--speaker "$SPEAKER_FILTER")
+if [[ -n "${DISTILL_SPEAKER:-}" ]]; then
+  CMD+=(--speaker "$DISTILL_SPEAKER")
 fi
 
 if [[ -n "${DISTILL_EVAL_SUITE:-}" ]]; then
   CMD+=(--suite "$DISTILL_EVAL_SUITE")
 fi
 
-if [[ -n "$DISTILL_NEW_WEIGHT_VALUE" ]]; then
-  CMD+=(--new-corpus-weight "$DISTILL_NEW_WEIGHT_VALUE")
+if [[ -n "${DISTILL_TO_VERSION:-}" ]]; then
+  CMD+=(--to "$DISTILL_TO_VERSION")
+fi
+
+if [[ -n "${DISTILL_CORRECTION_TEXT:-}" ]]; then
+  CMD+=(--text "$DISTILL_CORRECTION_TEXT")
+fi
+
+if [[ -n "${DISTILL_CORRECTION_SECTION:-}" ]]; then
+  CMD+=(--correction-section "$DISTILL_CORRECTION_SECTION")
 fi
 
 (
@@ -137,3 +159,4 @@ fi
   export PYTHONPATH="$PROJECT_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
   "${CMD[@]}"
 )
+

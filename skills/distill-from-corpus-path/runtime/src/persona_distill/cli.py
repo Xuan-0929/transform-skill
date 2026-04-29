@@ -15,6 +15,12 @@ from .providers import (
     resolve_runtime_spec,
 )
 from .repository import PersonaRepository
+from .semantic_commands import (
+    SemanticRequest,
+    intent_requires_llm,
+    normalize_intent,
+    run_semantic_command,
+)
 from .utils import canonical_skill_name
 from .workflow import (
     add_correction,
@@ -326,6 +332,63 @@ def correction(
     typer.echo(note.model_dump_json(indent=2))
 
 
+@app.command("friend")
+def friend_cmd(
+    intent: str = typer.Option(..., "--intent", help="friend-create|friend-update|friend-list|friend-history|friend-rollback|friend-export|friend-correct|friend-doctor"),
+    input_path: Path | None = typer.Option(None, "--input", exists=False, file_okay=True, dir_okay=False),
+    persona: str | None = typer.Option(None, "--persona", help="Friend persona identifier"),
+    fmt: str = typer.Option("auto", "--format", help="auto|text|json|csv"),
+    speaker: str | None = typer.Option(None, "--speaker", help="Only ingest messages from this speaker"),
+    new_corpus_weight: float = typer.Option(
+        0.25,
+        "--new-corpus-weight",
+        min=0.0,
+        max=1.0,
+        help="Weight of newly ingested corpus when updating an existing skill (0.0-1.0).",
+    ),
+    suite: Path | None = typer.Option(None, "--suite", help="Eval suite JSON path"),
+    target: str = typer.Option("both", "--target", help="agentskills|codex|both|none"),
+    to: str | None = typer.Option(None, "--to", help="Target version for friend-rollback/friend-export"),
+    text: str | None = typer.Option(None, "--text", help="Correction instruction for friend-correct"),
+    correction_section: str = typer.Option(
+        "beliefs_and_values", "--correction-section", help="Target section for friend-correct"
+    ),
+    history_limit: int = typer.Option(20, "--history-limit", help="Max history events for friend-history"),
+) -> None:
+    """User semantic command layer for friend-skill distillation and maintenance."""
+    normalized_intent = normalize_intent(intent)
+    if target not in {"agentskills", "codex", "both", "none"}:
+        raise typer.BadParameter("--target must be agentskills|codex|both|none")
+    resolved_input = input_path.resolve() if input_path else None
+
+    def _run(provider_obj) -> None:
+        repo = _repo()
+        result = run_semantic_command(
+            repo=repo,
+            provider=provider_obj,
+            request=SemanticRequest(
+                intent=normalized_intent,
+                input_path=resolved_input,
+                persona=persona,
+                fmt=fmt,
+                speaker=speaker,
+                new_corpus_weight=new_corpus_weight,
+                suite=suite.resolve() if suite else None,
+                target=target,
+                to_version=to,
+                correction_text=text,
+                correction_section=correction_section,
+                history_limit=history_limit,
+            ),
+        )
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
+
+    if intent_requires_llm(normalized_intent):
+        _provider_guard(lambda: _run(build_provider()))
+    else:
+        _run(None)
+
+
 @app.command("doctor")
 def doctor_cmd() -> None:
     """Show active distillation runtime."""
@@ -337,8 +400,9 @@ def doctor_cmd() -> None:
         "hints": [
             "Distillation is Claude Code runtime only: no local heuristic switch and no API config path.",
             "Make sure local Claude CLI is authenticated: `claude auth login`.",
-            "Fast path: `distill run --input <path> --target both`.",
-            "Agent-led path: `distill orchestrate --input <path> --target both`.",
+            "User semantic path: `distill friend --intent friend-update --input <path> --persona <id>`.",
+            "Cold-start path: `distill friend --intent friend-create --input <path> --persona <id>`.",
+            "Engineer path: `distill orchestrate --input <path> --target both`.",
         ],
     }
     typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))

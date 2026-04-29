@@ -965,7 +965,38 @@ def _select_agent_candidates(section: str, candidates: list[Candidate], limit: i
     return selected
 
 
-def _agent_section_prompt(persona_id: str, section: str, selected: list[tuple[str, Candidate]]) -> str:
+def _friend_object_model_block() -> str:
+    return (
+        "Friend persona object model:\n"
+        "- preserve reciprocal friendship stance: candid but caring, direct but not humiliating;\n"
+        "- value durable trust over short-term pleasing;\n"
+        "- include companionship behavior: practical help, emotional containment, and boundary honesty;\n"
+        "- keep banter and warmth balanced; avoid therapist-like over-smoothing.\n"
+    )
+
+
+def _style_anchor_block(style_anchors: list[str], signature_anchors: list[str]) -> str:
+    if not style_anchors and not signature_anchors:
+        return ""
+    style_lines = "\n".join(f"- {line}" for line in style_anchors[:8]) or "- none"
+    lexicon_line = ", ".join(signature_anchors[:16]) if signature_anchors else "none"
+    return (
+        "Style continuity anchors from existing skill:\n"
+        "- Keep these established phrasings/rhythms unless strong contrary evidence appears.\n"
+        f"{style_lines}\n"
+        f"- Signature lexicon to preserve when natural: {lexicon_line}\n"
+        "- If new corpus conflicts with anchors, downshift confidence instead of aggressive overwrite.\n"
+    )
+
+
+def _agent_section_prompt(
+    persona_id: str,
+    section: str,
+    selected: list[tuple[str, Candidate]],
+    profile_mode: str,
+    style_anchors: list[str],
+    signature_anchors: list[str],
+) -> str:
     section_goal = {
         "beliefs_and_values": "core value ordering and stable preference priors",
         "mental_models": "portable cognitive lenses that can generalize to new situations",
@@ -973,12 +1004,19 @@ def _agent_section_prompt(persona_id: str, section: str, selected: list[tuple[st
         "anti_patterns_and_limits": "explicit refusal boundaries and failure modes",
     }.get(section, "persona signals")
     evidence_lines = "\n".join(f"[{ev_id}] {candidate.claim}" for ev_id, candidate in selected)
+    mode_block = ""
+    if profile_mode == "friend_cold_start":
+        mode_block = _friend_object_model_block()
+    elif profile_mode == "style_anchored_update":
+        mode_block = _style_anchor_block(style_anchors, signature_anchors)
     return (
-        "You are Nuwa-plus-Colleague persona distillation agent.\n"
+        "You are Friend-Skill persona distillation agent.\n"
         "TASK:SECTION_EXTRACTION\n"
         f"PERSONA:{persona_id}\n"
+        f"PROFILE_MODE:{profile_mode}\n"
         f"SECTION: {section}\n"
         f"GOAL: extract {section_goal}.\n"
+        f"{mode_block}"
         "Hard doctrine:\n"
         "1) abstract-first, never parrot raw chat lines;\n"
         "2) keep only transferable claims that can guide unseen but adjacent tasks;\n"
@@ -1059,6 +1097,9 @@ def _build_agent_grouped(
     persona_id: str,
     provider: ModelProvider,
     candidates: list[Candidate],
+    profile_mode: str,
+    style_anchors: list[str],
+    signature_anchors: list[str],
 ) -> dict[str, list[EvidenceClaim]]:
     grouped: dict[str, list[EvidenceClaim]] = defaultdict(list)
 
@@ -1070,7 +1111,14 @@ def _build_agent_grouped(
 
         selected = [(f"ev_{idx:03d}", c) for idx, c in enumerate(selected_candidates, start=1)]
         ev_map = {ev_id: c for ev_id, c in selected}
-        prompt = _agent_section_prompt(persona_id, section, selected)
+        prompt = _agent_section_prompt(
+            persona_id=persona_id,
+            section=section,
+            selected=selected,
+            profile_mode=profile_mode,
+            style_anchors=style_anchors,
+            signature_anchors=signature_anchors,
+        )
 
         try:
             raw = provider.run_agent(prompt)
@@ -1249,6 +1297,8 @@ def extract_profile_agentic(
     corrections: list[CorrectionNote],
     provider: ModelProvider,
     target_speaker: str | None = None,
+    profile_mode: str = "friend_cold_start",
+    style_anchor_profile: PersonaProfile | None = None,
 ) -> PersonaProfile:
     resolved_speaker = target_speaker or persona_id
     target_items = [i for i in items if i.speaker == resolved_speaker]
@@ -1258,10 +1308,15 @@ def extract_profile_agentic(
     style_memory = _build_style_memory(working_items)
     signature_lexicon = _build_signature_lexicon(working_items)
     context_reply_memory = _build_context_reply_memory(items, resolved_speaker)
+    style_anchors = style_anchor_profile.style_memory[:40] if style_anchor_profile else []
+    signature_anchors = style_anchor_profile.signature_lexicon[:40] if style_anchor_profile else []
     grouped = _build_agent_grouped(
         persona_id=persona_id,
         provider=provider,
         candidates=candidates,
+        profile_mode=profile_mode,
+        style_anchors=style_anchors,
+        signature_anchors=signature_anchors,
     )
 
     return _finalize_profile(
@@ -1275,5 +1330,5 @@ def extract_profile_agentic(
         style_memory=style_memory,
         signature_lexicon=signature_lexicon,
         context_reply_memory=context_reply_memory,
-        distillation_mode="agent",
+        distillation_mode=f"agent:{profile_mode}",
     )

@@ -392,6 +392,8 @@ def _build_common(
         corrections=corrections,
         provider=provider,
         target_speaker=persona_id,
+        profile_mode="style_anchored_update" if previous_profile is not None else "friend_cold_start",
+        style_anchor_profile=previous_profile,
     )
 
     if previous_profile is not None:
@@ -574,6 +576,8 @@ def update_persona(
             corrections=corrections,
             provider=provider,
             target_speaker=persona_id,
+            profile_mode="style_anchored_update",
+            style_anchor_profile=previous_profile,
         )
         profile, changed_sections, conflict_count = _merge_profiles(
             previous=previous_profile,

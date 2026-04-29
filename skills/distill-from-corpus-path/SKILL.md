@@ -1,60 +1,79 @@
 ---
 name: distill-from-corpus-path
-description: Update an existing skill with new corpus by only providing a corpus path (update-first), with optional cold-start distillation from scratch. Use this skill when the user wants Claude Code or Codex to evolve persona skills through an agent-led, script-executed workflow.
+description: Use when the user wants to evolve a friend-style skill from JSON corpus paths with update-first behavior, semantic maintenance commands, and optional cold-start creation.
+argument-hint: "[friend-command-or-corpus-path]"
+user-invocable: true
+allowed-tools: Read, Write, Edit, Bash
 ---
 
-# Distill From Corpus Path
+# transform-skill Operator
 
-## Workflow
+## Trigger
 
-1. Confirm the corpus file path exists and is readable.
-2. Confirm Claude Code CLI runtime is ready:
-   - `claude --version` works
-   - `claude auth status` shows `"loggedIn": true`
-3. Resolve project root:
-   - Prefer `DISTILL_PROJECT_ROOT` when set.
-   - Otherwise run from the current directory if it contains `src/persona_distill`.
-   - If installed via OpenSkills, fallback to bundled runtime under `${CLAUDE_SKILL_DIR}/runtime`.
-4. Primary path (recommended): agent-led + script-executed orchestration:
-   - `distill orchestrate --input <path> --persona <existing_persona> --new-corpus-weight <0.0-1.0> --target both`
-   - This path returns stage-level JSON (`plan -> execute_update -> export`).
-5. Compatibility path (legacy one-shot): `distill run --input <path> ...`
-6. Optional path: cold-start distillation when no persona exists yet:
-   - `distill orchestrate --input <path> --target both`
-7. Return the generated version, status, stage outputs, and exported paths from CLI JSON.
+Start this skill when the user asks to:
+- distill from a JSON corpus path
+- update an existing friend skill with new corpus
+- manage versions (list/history/rollback/export/correction)
+- keep old style while absorbing new corpus
 
-## Command Contract
+## Runtime Positioning
 
-- Primary runner script: `scripts/run_agent_orchestrated.sh`
-- Compatibility runner script: `scripts/run_distill_from_path.sh`
-- Required argument: corpus path.
-- Optional argument 2: persona id override.
-- Optional argument 3: speaker filter.
-- Optional env overrides:
-  - `DISTILL_PROJECT_ROOT`
-  - `DISTILL_EXPORT_TARGET` (default `both`)
-  - `DISTILL_FORMAT` (default `auto`)
-  - `DISTILL_NEW_CORPUS_WEIGHT` (optional, `0.0-1.0`, lower means stronger persona preservation)
-  - `DISTILL_EVAL_SUITE` (optional)
-  - `DISTILL_SKIP_CLAUDE_AUTH_CHECK` (optional, test-only; set `1` to skip login precheck)
-  - `DISTILL_AUTO_BOOTSTRAP` (optional, default `1`; set `0` to disable auto-venv dependency bootstrap)
+- This skill is **agent-led + script-executed**.
+- Data ingestion stays JSON-first (no extra connectors in this skill).
+- Primary operation layer is **semantic friend commands** (not engineering-only CLI).
 
-## Output Requirements
+## Semantic Command Layer
 
-1. Print raw JSON from `distill orchestrate`.
-2. Surface these fields in the response:
-   - `persona`
-   - `version`
-   - `status`
-   - `output_dir`
-   - `workflow_mode`
-   - `plan`
-   - `stages`
-   - `export.exports.agentskills` and `export.exports.codex` when present
-3. If validation or gates fail, still report the new version and quarantine status.
-4. Emphasize update-first flow in user-facing explanation; mention cold-start only as optional.
+Use `distill friend --intent <intent>` as the canonical interface.
+
+| Intent | Meaning | LLM needed |
+|---|---|---|
+| `friend-create` | Cold-start create from corpus | yes |
+| `friend-update` | Update existing skill from new corpus | yes |
+| `friend-list` | List all distilled friends | no |
+| `friend-history` | Show version/audit history | no |
+| `friend-rollback` | Roll back to target version | no |
+| `friend-export` | Export current/target version | no |
+| `friend-correct` | Add correction layer note | no |
+| `friend-doctor` | Show runtime and command guidance | no |
+
+## Primary Runner
+
+- `scripts/run_friend_command.sh`
+  - Usage: `run_friend_command.sh <intent> [corpus_path] [persona_id]`
+  - Examples:
+    - `run_friend_command.sh friend-create ./corpus/bootstrap/friend.json laojin`
+    - `run_friend_command.sh friend-update ./corpus/incoming/week3.json laojin`
+    - `run_friend_command.sh friend-history "" laojin`
+
+## Compatibility Runners (Maintainer)
+
+- `scripts/run_agent_orchestrated.sh` (agent-led engineering path)
+- `scripts/run_distill_from_path.sh` (legacy one-shot path)
+
+## Dependency Strategy (Optional-First)
+
+- Base requirement: Python 3.10+, local `claude` CLI for LLM intents.
+- Optional deps install:
+  - `pip3 install -r skills/distill-from-corpus-path/runtime/requirements.txt`
+- Auto bootstrap is **off by default**; enable only when needed:
+  - `DISTILL_AUTO_BOOTSTRAP=1`
+- Auth precheck is **off by default**; enable for strict ops:
+  - `DISTILL_PRECHECK_CLAUDE_AUTH=1`
+
+## Execution Rules
+
+1. Resolve corpus path and persona id.
+2. Prefer semantic intent flow first.
+3. If intent is `friend-update`, keep update-first defaults with controllable `new-corpus-weight`.
+4. If intent is `friend-create`, cold-start with friend-oriented object model.
+5. Return raw JSON plus key fields:
+   - `semantic_intent`, `persona`, `version`, `status`, `workflow_mode`, `plan`, `stages`
+   - export paths when present.
 
 ## User Invocation Examples
 
-- `请使用 distill-from-corpus-path，把 /absolute/path/<new-corpus-file>.json 更新到 persona=<your-persona-id>，新语料权重 0.2（agent主导+脚本执行）`
-- `请使用 distill-from-corpus-path，用 /absolute/path/<bootstrap-corpus-file>.json 冷启动蒸馏 persona=<your-persona-id>（可选）`
+- `请使用 distill-from-corpus-path，执行 friend-update：语料 ./corpus/incoming/new.json，persona=laojin，新语料权重 0.2，并导出到 agentskills + codex。`
+- `请使用 distill-from-corpus-path，执行 friend-create：语料 ./corpus/bootstrap/friend_seed.json，persona=laojin。`
+- `请使用 distill-from-corpus-path，执行 friend-history，persona=laojin。`
+

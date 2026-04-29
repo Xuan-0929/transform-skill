@@ -73,7 +73,7 @@ if ! command -v claude >/dev/null 2>&1; then
   exit 2
 fi
 
-if [[ "${DISTILL_SKIP_CLAUDE_AUTH_CHECK:-0}" != "1" ]]; then
+if [[ "${DISTILL_PRECHECK_CLAUDE_AUTH:-0}" == "1" && "${DISTILL_SKIP_CLAUDE_AUTH_CHECK:-0}" != "1" ]]; then
   AUTH_STATUS="$(claude auth status 2>/dev/null || true)"
   if [[ "$AUTH_STATUS" != *'"loggedIn": true'* ]]; then
     echo "Claude CLI is not logged in. Run: claude auth login" >&2
@@ -83,20 +83,34 @@ fi
 
 PYTHON_BIN="python3"
 RUNTIME_REQ="$PROJECT_ROOT/requirements.txt"
+if [[ ! -f "$RUNTIME_REQ" && -f "$SKILL_DIR/runtime/requirements.txt" ]]; then
+  RUNTIME_REQ="$SKILL_DIR/runtime/requirements.txt"
+fi
 
-if [[ "${DISTILL_AUTO_BOOTSTRAP:-1}" != "0" && -f "$RUNTIME_REQ" ]]; then
+if [[ -f "$RUNTIME_REQ" ]]; then
   if ! PYTHONPATH="$PROJECT_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
     "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
 import typer, pydantic, yaml
 PY
   then
-    VENV_DIR="$PROJECT_ROOT/.venv"
-    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-      "$PYTHON_BIN" -m venv "$VENV_DIR"
+    if [[ "${DISTILL_AUTO_BOOTSTRAP:-0}" == "1" ]]; then
+      VENV_DIR="$PROJECT_ROOT/.venv"
+      if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+        "$PYTHON_BIN" -m venv "$VENV_DIR"
+      fi
+      "$VENV_DIR/bin/python" -m pip install --upgrade pip >/dev/null
+      "$VENV_DIR/bin/python" -m pip install -r "$RUNTIME_REQ" >/dev/null
+      PYTHON_BIN="$VENV_DIR/bin/python"
+    else
+      cat >&2 <<'ERR'
+Python dependencies are missing.
+Install optional runtime deps with:
+  pip3 install -r skills/distill-from-corpus-path/runtime/requirements.txt
+Or enable auto bootstrap:
+  DISTILL_AUTO_BOOTSTRAP=1
+ERR
+      exit 2
     fi
-    "$VENV_DIR/bin/python" -m pip install --upgrade pip >/dev/null
-    "$VENV_DIR/bin/python" -m pip install -r "$RUNTIME_REQ" >/dev/null
-    PYTHON_BIN="$VENV_DIR/bin/python"
   fi
 fi
 
