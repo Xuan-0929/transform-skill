@@ -48,5 +48,5 @@ description: Update an existing skill with new corpus by only providing a corpus
 
 ## User Invocation Examples
 
-- `请使用 distill-from-corpus-path，把 /absolute/path/new_chat.json 更新到 persona=laojin，新语料权重 0.2`
-- `请使用 distill-from-corpus-path，用 /absolute/path/bootstrap_chat.json 冷启动蒸馏 persona=laojin（可选）`
+- `请使用 distill-from-corpus-path，把 /absolute/path/<new-corpus-file>.json 更新到 persona=<your-persona-id>，新语料权重 0.2`
+- `请使用 distill-from-corpus-path，用 /absolute/path/<bootstrap-corpus-file>.json 冷启动蒸馏 persona=<your-persona-id>（可选）`

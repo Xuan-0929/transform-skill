@@ -21,6 +21,8 @@ export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
 ```
 
 ## Quickstart (Nuwa / colleague.skill style)
+All `<...>` values below are placeholders. Replace them with your actual values.
+
 ### 1) Prepare corpus folders
 ```bash
 mkdir -p corpus/bootstrap corpus/incoming
@@ -37,20 +39,20 @@ claude auth login
 
 ### 3) Tell Claude Code directly (recommended)
 ```text
-Use distill-from-corpus-path to update persona=laojin with ./corpus/incoming/week2.json and new-corpus-weight=0.2
+Use distill-from-corpus-path to update persona=<your-persona-id> with ./corpus/incoming/<new-corpus-file>.json and new-corpus-weight=0.2
 ```
 
 Optional cold-start:
 ```text
-Use distill-from-corpus-path to cold-start persona=laojin from ./corpus/bootstrap/day0.json
+Use distill-from-corpus-path to cold-start persona=<your-persona-id> from ./corpus/bootstrap/<bootstrap-corpus-file>.json
 ```
 
 ### 4) Direct command mode (optional)
 ```bash
 DISTILL_NEW_CORPUS_WEIGHT=0.2 \
 ./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh \
-./corpus/incoming/week2.json \
-laojin
+./corpus/incoming/<new-corpus-file>.json \
+<your-persona-id>
 ```
 
 ## Output locations

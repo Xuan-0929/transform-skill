@@ -21,6 +21,8 @@ export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
 ```
 
 ## クイックスタート（Nuwa / colleague.skill 風）
+以下の `<...>` はすべてプレースホルダーです。実際の値に置き換えてください。
+
 ### 1) コーパスフォルダを準備
 ```bash
 mkdir -p corpus/bootstrap corpus/incoming
@@ -37,20 +39,20 @@ claude auth login
 
 ### 3) Claude Code にそのまま指示（推奨）
 ```text
-distill-from-corpus-path を使って ./corpus/incoming/week2.json で persona=laojin を更新、new-corpus-weight=0.2
+distill-from-corpus-path を使って ./corpus/incoming/<new-corpus-file>.json で persona=<your-persona-id> を更新、new-corpus-weight=0.2
 ```
 
 任意（コールドスタート）：
 ```text
-distill-from-corpus-path を使って ./corpus/bootstrap/day0.json から persona=laojin を初回蒸留
+distill-from-corpus-path を使って ./corpus/bootstrap/<bootstrap-corpus-file>.json から persona=<your-persona-id> を初回蒸留
 ```
 
 ### 4) 直接コマンド実行（任意）
 ```bash
 DISTILL_NEW_CORPUS_WEIGHT=0.2 \
 ./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh \
-./corpus/incoming/week2.json \
-laojin
+./corpus/incoming/<new-corpus-file>.json \
+<your-persona-id>
 ```
 
 ## 出力先

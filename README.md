@@ -27,6 +27,8 @@ export DISTILL_PROJECT_ROOT=/absolute/path/to/transform.skill
 ```
 
 ## 快速启动（Nuwa / 同事.skill 风格）
+以下示例中的 `<...>` 都是占位符，请替换成你自己的真实值。
+
 ### 1) 先放语料
 ```bash
 mkdir -p corpus/bootstrap corpus/incoming
@@ -37,8 +39,8 @@ mkdir -p corpus/bootstrap corpus/incoming
 - `corpus/incoming/`：后续新增语料（更新）
 
 路径支持相对/绝对两种：
-- `./corpus/incoming/week2.json`
-- `/Users/you/data/week2.json`
+- `./corpus/incoming/<new-corpus-file>.json`
+- `/absolute/path/<new-corpus-file>.json`
 
 ### 2) 登录 Claude（一次）
 ```bash
@@ -47,12 +49,12 @@ claude auth login
 
 ### 3) 在 Claude Code 里直接说（推荐）
 ```text
-请使用 distill-from-corpus-path，把 ./corpus/incoming/week2.json 更新到 persona=laojin，新语料权重 0.2
+请使用 distill-from-corpus-path，把 ./corpus/incoming/<new-corpus-file>.json 更新到 persona=<your-persona-id>，新语料权重 0.2
 ```
 
 可选：
 ```text
-请使用 distill-from-corpus-path，用 ./corpus/bootstrap/day0.json 冷启动 persona=laojin
+请使用 distill-from-corpus-path，用 ./corpus/bootstrap/<bootstrap-corpus-file>.json 冷启动 persona=<your-persona-id>
 ```
 
 ### 4) 你想直接敲命令也可以
@@ -60,23 +62,23 @@ claude auth login
 ```bash
 DISTILL_NEW_CORPUS_WEIGHT=0.2 \
 ./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh \
-./corpus/incoming/week2.json \
-laojin
+./corpus/incoming/<new-corpus-file>.json \
+<your-persona-id>
 ```
 
 从 0 冷启动（可选）：
 ```bash
 ./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh \
-./corpus/bootstrap/day0.json \
-laojin
+./corpus/bootstrap/<bootstrap-corpus-file>.json \
+<your-persona-id>
 ```
 
 指定 speaker（可选）：
 ```bash
 ./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh \
-./corpus/incoming/week2.json \
-laojin \
-阿金
+./corpus/incoming/<new-corpus-file>.json \
+<your-persona-id> \
+<speaker-name>
 ```
 
 ## 结果文件在哪
