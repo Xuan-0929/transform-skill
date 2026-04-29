@@ -72,7 +72,7 @@ mkdir -p corpus/bootstrap corpus/incoming
 ```text
 请使用 distill-from-corpus-path，执行 friend-update：
 语料路径 ./corpus/incoming/<new_corpus>.json，目标 friend_id=<friend_id>，
-新语料权重 0.2，并导出 agentskills 和 codex。
+目标说话人=<target_speaker>，新语料权重 0.2，并导出 agentskills 和 codex。
 ```
 
 冷启动（可选）：
@@ -80,8 +80,21 @@ mkdir -p corpus/bootstrap corpus/incoming
 ```text
 请使用 distill-from-corpus-path，执行 friend-create：
 语料路径 ./corpus/bootstrap/<seed_corpus>.json，目标 friend_id=<friend_id>，
-并导出 agentskills 和 codex。
+目标说话人=<target_speaker>，并导出 agentskills 和 codex。
 ```
+
+`<target_speaker>` 必须与语料里的说话人字段一致（如 JSON 的 `speaker` / `role` / `author` / `name`，或文本格式里的“说话人: 内容”前缀）。
+
+---
+
+## 多人语料如何指定蒸馏对象
+
+多人聊天语料时，建议每次明确指定一个 `target_speaker`，避免模型混合多个人的表达习惯。
+
+推荐流程：
+1. 先确认语料里目标用户的说话人名称（如 `Alex`）。
+2. 执行 `friend-create` 或 `friend-update` 时显式带上 `target_speaker=Alex`。
+3. 后续更新同一人格时继续使用同一个 `friend_id` 与 `target_speaker`。
 
 ---
 
@@ -103,7 +116,7 @@ mkdir -p corpus/bootstrap corpus/incoming
 脚本运维入口（可选）：
 
 ```bash
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh <intent> [corpus_path] [friend_id]
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh <intent> [corpus_path] [friend_id] [target_speaker]
 ```
 
 示例：
@@ -117,6 +130,9 @@ mkdir -p corpus/bootstrap corpus/incoming
 
 # 回滚到某个版本
 DISTILL_TO_VERSION=<version> ./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-rollback "" <friend_id>
+
+# 用多人语料更新指定用户
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-update ./corpus/incoming/<new_corpus>.json <friend_id> <target_speaker>
 ```
 
 ---
@@ -187,6 +203,10 @@ DISTILL_AUTO_BOOTSTRAP=1
 ### `friend_id` 是什么
 
 `friend_id` 是你给人格起的唯一标识，用来更新、导出、回滚同一个人格。建议使用英文短横线风格，例如 `friend-alex`。
+
+### `target_speaker` 是什么
+
+`target_speaker` 是语料中你要蒸馏的固定用户名称。它应与语料内说话人字段完全一致（区分大小写和空格）。
 
 ### 必须手动写 `friend_id` 吗
 

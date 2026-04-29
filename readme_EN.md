@@ -52,6 +52,7 @@ Update existing skill:
 Use distill-from-corpus-path and run friend-update:
 input=./corpus/incoming/<new_corpus>.json,
 friend_id=<friend_id>,
+target_speaker=<target_speaker>,
 new-corpus-weight=0.2,
 export both agentskills and codex.
 ```
@@ -62,8 +63,20 @@ Cold start (optional):
 Use distill-from-corpus-path and run friend-create:
 input=./corpus/bootstrap/<seed_corpus>.json,
 friend_id=<friend_id>,
+target_speaker=<target_speaker>,
 export both agentskills and codex.
 ```
+
+`<target_speaker>` should match the speaker name in your corpus fields (`speaker`, `role`, `author`, `name`, or text prefix like `Speaker: content`).
+
+## Multi-Speaker Corpus: Select One Person
+
+If your chat corpus includes multiple people, always fix a single target speaker for each distillation run.
+
+Recommended pattern:
+1. Find the exact speaker label in corpus (for example `Alex`).
+2. Pass `target_speaker=Alex` in create/update runs.
+3. Keep using the same `friend_id` + `target_speaker` pair for future updates.
 
 ## Semantic Command Layer
 
@@ -81,7 +94,7 @@ Primary interface is semantic commands:
 Maintainer runner (optional):
 
 ```bash
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh <intent> [corpus_path] [friend_id]
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh <intent> [corpus_path] [friend_id] [target_speaker]
 ```
 
 ## Update-First Strategy

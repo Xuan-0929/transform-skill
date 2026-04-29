@@ -85,7 +85,7 @@ DISTILL_AUTO_BOOTSTRAP=1 ./skills/distill-from-corpus-path/scripts/run_friend_co
 - Turn on strict auth precheck if your ops policy requires it:
 
 ```bash
-DISTILL_PRECHECK_CLAUDE_AUTH=1 ./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-update ./corpus/incoming/new.json laojin
+DISTILL_PRECHECK_CLAUDE_AUTH=1 ./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-update ./corpus/incoming/<new_corpus>.json <friend_id> <target_speaker>
 ```
 
 ## 4. First Run (Host-Agnostic)
@@ -101,8 +101,9 @@ Cold-start:
 ```bash
 ./skills/distill-from-corpus-path/scripts/run_friend_command.sh \
   friend-create \
-  ./corpus/bootstrap/friend_seed.json \
-  laojin
+  ./corpus/bootstrap/<seed_corpus>.json \
+  <friend_id> \
+  <target_speaker>
 ```
 
 Update:
@@ -111,8 +112,9 @@ Update:
 DISTILL_NEW_CORPUS_WEIGHT=0.2 \
 ./skills/distill-from-corpus-path/scripts/run_friend_command.sh \
   friend-update \
-  ./corpus/incoming/week3.json \
-  laojin
+  ./corpus/incoming/<new_corpus>.json \
+  <friend_id> \
+  <target_speaker>
 ```
 
 ## 5. Maintenance Commands
@@ -122,20 +124,20 @@ DISTILL_NEW_CORPUS_WEIGHT=0.2 \
 ./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-list
 
 # show history
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-history "" laojin
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-history "" <friend_id>
 
 # rollback
 DISTILL_TO_VERSION=v0003 \
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-rollback "" laojin
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-rollback "" <friend_id>
 
 # export
 DISTILL_EXPORT_TARGET=both \
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-export "" laojin
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-export "" <friend_id>
 
 # add correction note
 DISTILL_CORRECTION_TEXT="少一点说教，多一点兄弟口吻" \
 DISTILL_CORRECTION_SECTION=expression_dna \
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-correct "" laojin
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-correct "" <friend_id>
 ```
 
 ## 6. Troubleshooting
@@ -158,4 +160,3 @@ claude auth login
 ```bash
 pip3 install -r skills/distill-from-corpus-path/runtime/requirements.txt
 ```
-

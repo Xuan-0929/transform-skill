@@ -52,6 +52,7 @@ mkdir -p corpus/bootstrap corpus/incoming
 distill-from-corpus-path を使って friend-update を実行してください。
 input=./corpus/incoming/<new_corpus>.json,
 friend_id=<friend_id>,
+target_speaker=<target_speaker>,
 new-corpus-weight=0.2,
 agentskills と codex を export。
 ```
@@ -62,8 +63,20 @@ agentskills と codex を export。
 distill-from-corpus-path を使って friend-create を実行してください。
 input=./corpus/bootstrap/<seed_corpus>.json,
 friend_id=<friend_id>,
+target_speaker=<target_speaker>,
 agentskills と codex を export。
 ```
+
+`<target_speaker>` はコーパス内の話者名と一致させてください（`speaker` / `role` / `author` / `name`、または `話者: 内容` 形式の話者ラベル）。
+
+## 複数人チャットのコーパスについて
+
+複数人の会話ログを使う場合、毎回 1 人の対象話者を固定して蒸留するのが安全です。
+
+推奨手順:
+1. コーパス内の対象話者ラベルを確認（例: `Alex`）。
+2. create/update 実行時に `target_speaker=Alex` を明示。
+3. 以後の更新でも同じ `friend_id` と `target_speaker` を継続使用。
 
 ## セマンティックコマンド層
 
@@ -81,7 +94,7 @@ agentskills と codex を export。
 メンテナ向け実行スクリプト（任意）:
 
 ```bash
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh <intent> [corpus_path] [friend_id]
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh <intent> [corpus_path] [friend_id] [target_speaker]
 ```
 
 ## Update-First 戦略

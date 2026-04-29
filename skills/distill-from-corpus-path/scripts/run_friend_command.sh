@@ -2,14 +2,15 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: run_friend_command.sh <intent> [corpus_path] [persona_id]" >&2
-  echo "Example: run_friend_command.sh friend-update ./corpus/new.json laojin" >&2
+  echo "Usage: run_friend_command.sh <intent> [corpus_path] [persona_id] [target_speaker]" >&2
+  echo "Example: run_friend_command.sh friend-update ./corpus/new.json friend-alex Alex" >&2
   exit 1
 fi
 
 INTENT="$1"
 INPUT_PATH="${2:-}"
 PERSONA_ID="${3:-}"
+TARGET_SPEAKER="${4:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -134,7 +135,9 @@ if [[ -n "$PERSONA_ID" ]]; then
   CMD+=(--persona "$PERSONA_ID")
 fi
 
-if [[ -n "${DISTILL_SPEAKER:-}" ]]; then
+if [[ -n "$TARGET_SPEAKER" ]]; then
+  CMD+=(--speaker "$TARGET_SPEAKER")
+elif [[ -n "${DISTILL_SPEAKER:-}" ]]; then
   CMD+=(--speaker "$DISTILL_SPEAKER")
 fi
 
@@ -159,4 +162,3 @@ fi
   export PYTHONPATH="$PROJECT_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
   "${CMD[@]}"
 )
-

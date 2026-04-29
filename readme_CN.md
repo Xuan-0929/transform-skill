@@ -31,12 +31,15 @@ mkdir -p corpus/bootstrap corpus/incoming
 ```text
 请使用 distill-from-corpus-path，执行 friend-update：
 语料路径 ./corpus/incoming/<new_corpus>.json，目标 friend_id=<friend_id>，
-新语料权重 0.2，并导出 agentskills 和 codex。
+目标说话人=<target_speaker>，新语料权重 0.2，并导出 agentskills 和 codex。
 ```
+
+`<target_speaker>` 需要与语料里的说话人字段一致（如 `speaker` / `role` / `author` / `name`）。
 
 ## 关键概念
 
 - `friend_id`：人格唯一 ID（建议英文短横线，例如 `friend-alex`）。
+- `target_speaker`：多用户语料里要蒸馏的固定对象。
 - `friend-create`：冷启动创建人格。
 - `friend-update`：更新已有人格（推荐主路径）。
 - `new-corpus-weight`：控制新语料影响强度。
@@ -51,5 +54,10 @@ mkdir -p corpus/bootstrap corpus/incoming
 - `friend-export`
 - `friend-correct`
 - `friend-doctor`
+
+多人语料建议：
+1. 先确认目标用户在语料中的说话人名称。
+2. 在 `friend-create` 或 `friend-update` 时显式指定该 `target_speaker`。
+3. 后续更新沿用同一个 `friend_id + target_speaker` 组合。
 
 多 Host 安装与运维细节见 [INSTALL.md](./INSTALL.md)。

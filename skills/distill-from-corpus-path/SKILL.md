@@ -40,11 +40,11 @@ Use `distill friend --intent <intent>` as the canonical interface.
 ## Primary Runner
 
 - `scripts/run_friend_command.sh`
-  - Usage: `run_friend_command.sh <intent> [corpus_path] [persona_id]`
+  - Usage: `run_friend_command.sh <intent> [corpus_path] [persona_id] [target_speaker]`
   - Examples:
-    - `run_friend_command.sh friend-create ./corpus/bootstrap/friend.json laojin`
-    - `run_friend_command.sh friend-update ./corpus/incoming/week3.json laojin`
-    - `run_friend_command.sh friend-history "" laojin`
+    - `run_friend_command.sh friend-create ./corpus/bootstrap/<seed_corpus>.json <friend_id> <target_speaker>`
+    - `run_friend_command.sh friend-update ./corpus/incoming/<new_corpus>.json <friend_id> <target_speaker>`
+    - `run_friend_command.sh friend-history "" <friend_id>`
 
 ## Compatibility Runners (Maintainer)
 
@@ -73,7 +73,6 @@ Use `distill friend --intent <intent>` as the canonical interface.
 
 ## User Invocation Examples
 
-- `请使用 distill-from-corpus-path，执行 friend-update：语料 ./corpus/incoming/new.json，persona=laojin，新语料权重 0.2，并导出到 agentskills + codex。`
-- `请使用 distill-from-corpus-path，执行 friend-create：语料 ./corpus/bootstrap/friend_seed.json，persona=laojin。`
-- `请使用 distill-from-corpus-path，执行 friend-history，persona=laojin。`
-
+- `请使用 distill-from-corpus-path，执行 friend-update：语料 ./corpus/incoming/<new_corpus>.json，friend_id=<friend_id>，target_speaker=<target_speaker>，新语料权重 0.2，并导出到 agentskills + codex。`
+- `请使用 distill-from-corpus-path，执行 friend-create：语料 ./corpus/bootstrap/<seed_corpus>.json，friend_id=<friend_id>，target_speaker=<target_speaker>。`
+- `请使用 distill-from-corpus-path，执行 friend-history，friend_id=<friend_id>。`
