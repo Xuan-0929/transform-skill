@@ -1,15 +1,15 @@
-# Persona Skill Distill
+# transform.skill
 
 [中文版](./README.md) | [English](./readme_EN.md) | [日本語](./readme_JP.md)
 
 蒸馏过的朋友突然分手，性情大变？  
 兄弟的口头禅又变了，想更新 skill？
 
-欢迎来到这个项目：给你一份聊天语料，把它蒸成一个可复用的 skill；再给你一份新语料，温和更新，不把旧人格一脚踹飞。
+欢迎来到 `transform.skill`：它的核心不是“从 0 造一个人格”，而是让你把**新增语料持续注入已有 skill**，稳态进化，不推翻旧人格。
 
 ## 这项目能干啥
-- 从语料一键蒸馏出 skill（`run`）
-- 对已有 skill 做增量更新（`update`）
+- 对已有 skill 做增量更新（主路径）
+- 从 0 语料蒸馏 skill（可选路径）
 - 用 `new-corpus-weight` 控制“新语料话语权”
 - 导出为 Agent Skills / Codex 可消费格式
 - 单一路径运行：不需要 API Key，不需要 provider 切换
@@ -37,25 +37,20 @@ b) scripts/run_distill_from_path.sh
 claude auth login
 ```
 
-### 1) 在 Claude Code 里直接说
+### 1) 主路径：更新已有 skill（推荐）
 示例（自然语言触发 skill）：
-- `请使用 distill-from-corpus-path，把 /absolute/path/chat.json 蒸馏成 skill`
-- `请使用 distill-from-corpus-path，语料在 /absolute/path/new_chat.json，persona 用 laojin，并把新语料权重设为 0.2`
+- `请使用 distill-from-corpus-path，把 /absolute/path/new_chat.json 更新到 persona=laojin，新语料权重 0.2`
+- `请使用 distill-from-corpus-path，用 /absolute/path/week2.json 继续更新现有 skill，保持原人格风格`
 
-### 2) 或者直接调用 skill 入口脚本
-```bash
-./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /absolute/path/chat.json
-```
-
-可选：
-- 传 persona：`./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/chat.json laojin`
-- 传 speaker：`./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/chat.json laojin 阿金`
-
-### 3) 增量更新权重（skill模式）
+### 2) 或者直接调用 skill 入口脚本（更新模式）
 ```bash
 DISTILL_NEW_CORPUS_WEIGHT=0.2 \
 ./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /absolute/path/new_chat.json laojin
 ```
+
+可选：
+- 冷启动（从 0 蒸馏）：`./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/chat_bootstrap.json laojin`
+- 指定 speaker：`./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/new_chat.json laojin 阿金`
 
 ## `new-corpus-weight` 怎么选
 | 权重 | 适合场景 | 效果 |
@@ -81,6 +76,10 @@ PYTHONPATH=src python -m persona_distill run --input ./your_corpus.json --target
 ```
 
 ## 常见问题
+### 这个项目的重点到底是什么？
+重点是“**持续更新已有 skill**”。  
+从 0 蒸馏是可选入口，适合第一次建档。
+
 ### 我都挂在 Claude Code 了，为什么文档里还有 Python？
 因为有两类用户：
 - **Skill 使用者**：只关心“给路径就能蒸馏”（上面的 Skill 模式）
@@ -98,5 +97,5 @@ PYTHONPATH=src python -m persona_distill run --input ./your_corpus.json --target
 用 `update`，并把 `--new-corpus-weight` 调低（如 `0.2`）。
 
 ## 一句话收尾
-给语料，出 skill；再给语料，稳稳更新。  
-朋友变了，我们的 skill 也要体面地跟着进化。
+`transform.skill`：先有一个基线 skill，然后用新语料持续改造它。  
+不是重来，而是进化。

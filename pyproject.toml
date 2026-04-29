@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "persona-skill-distill"
+name = "transform.skill"
 version = "0.1.0"
-description = "Persona-to-skill distillation framework with incremental updates and evaluation gates"
+description = "Update-first skill evolution framework with optional cold-start distillation"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [

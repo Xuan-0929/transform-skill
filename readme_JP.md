@@ -1,15 +1,15 @@
-# Persona Skill Distill
+# transform.skill
 
 [中文版](./README.md) | [English](./readme_EN.md) | [日本語](./readme_JP.md)
 
 蒸留した友だち、失恋して急に人格変わった？  
 口ぐせが増えて、skill を更新したくなった？
 
-このプロジェクトは、チャットのコーパスを入れると skill を蒸留し、追加入力で人格を壊さずに更新するためのものです。
+`transform.skill` の主眼は「毎回ゼロから作ること」ではなく、「既存 skill を新しいコーパスで継続更新すること」です。
 
 ## できること
-- コーパスから skill を蒸留
-- 新しいコーパスで段階的に更新
+- 既存 skill の段階的アップデート（主ルート）
+- ゼロから蒸留（オプション）
 - `new-corpus-weight` で新語料の影響度を調整
 - Agent Skills / Codex 向けに出力
 - プロバイダ切替なしの単一路線実行
@@ -29,25 +29,20 @@
 claude auth login
 ```
 
-### 1) Claude Code にそのまま依頼
+### 1) 主ルート：既存 skill を更新
 例：
-- `distill-from-corpus-path を使って /absolute/path/chat.json を蒸留して`
-- `distill-from-corpus-path を使って /absolute/path/new_chat.json を更新、persona=laojin、weight=0.2`
+- `distill-from-corpus-path を使って /absolute/path/new_chat.json で persona=laojin を更新、weight=0.2`
+- `distill-from-corpus-path を使って既存 skill を /absolute/path/week2.json で継続更新して`
 
-### 2) もしくは skill 入口スクリプトを実行
-```bash
-./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /absolute/path/chat.json
-```
-
-オプション：
-- persona 指定: `./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/chat.json laojin`
-- speaker 指定: `./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/chat.json laojin Ajin`
-
-### 3) 更新重みを指定（skill モード）
+### 2) もしくは skill 入口スクリプトを実行（更新モード）
 ```bash
 DISTILL_NEW_CORPUS_WEIGHT=0.2 \
 ./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /absolute/path/new_chat.json laojin
 ```
+
+オプション：
+- コールドスタート（ゼロ蒸留）: `./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/bootstrap_chat.json laojin`
+- speaker 指定: `./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh /path/new_chat.json laojin Ajin`
 
 ## 重みの目安
 - `0.1-0.3`: 保守的（旧人格を強く保持）
@@ -68,6 +63,10 @@ PYTHONPATH=src python -m persona_distill run --input ./your_corpus.json --target
 ```
 
 ## FAQ
+### このプロジェクトの重点は？
+重点は **新語料による既存 skill の継続進化** です。  
+ゼロ蒸留は補助的な入口です。
+
 ### skill なのに Python コマンドが残っているのはなぜ？
 対象が2種類あるためです：
 - skill 利用者：パスを渡して蒸留するだけ
