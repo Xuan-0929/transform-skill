@@ -5,7 +5,7 @@
 > "蒸馏过的朋友突然分手，性情大变？"  
 > "兄弟的口头禅又变了，想更新 skill？"
 
-[中文版入口](./README.md) · [English](./readme_EN.md) · [日本語](./readme_JP.md)
+[中文版入口](./README.md) · [中文说明页](./readme_CN.md) · [English](./readme_EN.md) · [日本語](./readme_JP.md)
 
 [![GitHub stars](https://img.shields.io/github/stars/Xuan-0929/transform-skill?style=for-the-badge&logo=github)](https://github.com/Xuan-0929/transform-skill/stargazers)
 [![Last commit](https://img.shields.io/github/last-commit/Xuan-0929/transform-skill?style=for-the-badge&logo=github)](https://github.com/Xuan-0929/transform-skill/commits/main)
@@ -17,15 +17,13 @@
 
 ---
 
-## 这项目是干啥的
+## 这项目做什么
 
-`transform-skill` 是一个 **skill 生态** 项目，不是本地小脚本拼盘。
+`transform-skill` 是一个可安装的 skill 项目，用来把聊天语料蒸馏成“朋友型人格”，并持续更新。
 
-它专门解决两件事：
-1. 从 JSON 语料冷启动蒸馏一个“朋友型”人格（可选）。
-2. 用新语料持续更新已有 skill，同时保留旧风格（主路径）。
-
-一句话：**先有记忆，再做进化，不让新语料一脚把老人格踹飞。**
+它有两条路径：
+1. **冷启动（可选）**：从 0 开始蒸馏朋友人格。
+2. **更新优先（推荐）**：用新语料迭代已有人格，尽量保留原有风格。
 
 ---
 
@@ -35,14 +33,14 @@
 - [用户语义命令层](#用户语义命令层)
 - [更新优先策略](#更新优先策略)
 - [多 Host 安装](#多-host-安装)
+- [运行依赖策略](#运行依赖策略)
 - [运维与验收](#运维与验收)
-- [工程结构](#工程结构)
 
 ---
 
 ## 30 秒快速开始
 
-### 1) 一键装载 skill（推荐）
+### 1) 一键安装 skill（推荐）
 
 ```bash
 # Claude Code
@@ -52,85 +50,101 @@ npx skills add Xuan-0929/transform-skill --skill distill-from-corpus-path -a cla
 npx skills add Xuan-0929/transform-skill --skill distill-from-corpus-path -a codex -y
 ```
 
-### 2) 准备语料目录
+### 2) 准备语料目录与文件
 
 ```bash
 mkdir -p corpus/bootstrap corpus/incoming
 ```
 
-### 3) 在 Claude Code / Codex 里直接说（推荐）
+推荐放置方式：
 
-更新已有朋友 skill：
+| 用途 | 路径示例 | 说明 |
+|---|---|---|
+| 冷启动语料 | `corpus/bootstrap/<seed_corpus>.json` | 首次生成人格使用 |
+| 更新语料 | `corpus/incoming/<new_corpus>.json` | 给已有人格做增量更新 |
+
+`<friend_id>` 建议使用英文短横线风格（例如：`friend-alex`）。
+
+### 3) 在 Claude Code / Codex 会话里直接下达任务
+
+更新已有 skill（推荐主路径）：
 
 ```text
 请使用 distill-from-corpus-path，执行 friend-update：
-语料 ./corpus/incoming/week3.json，persona=laojin，新语料权重 0.2，导出 agentskills 和 codex。
+语料路径 ./corpus/incoming/<new_corpus>.json，目标 friend_id=<friend_id>，
+新语料权重 0.2，并导出 agentskills 和 codex。
 ```
 
 冷启动（可选）：
 
 ```text
 请使用 distill-from-corpus-path，执行 friend-create：
-语料 ./corpus/bootstrap/friend_seed.json，persona=laojin，导出 agentskills 和 codex。
+语料路径 ./corpus/bootstrap/<seed_corpus>.json，目标 friend_id=<friend_id>，
+并导出 agentskills 和 codex。
 ```
 
 ---
 
 ## 用户语义命令层
 
-这次重点改动：不再让使用者先理解工程命令 `distill orchestrate/run`，而是先用语义命令。
+主入口是语义命令，而不是工程命令。
 
 | 语义命令 | 作用 | 是否需要 LLM |
 |---|---|---|
-| `friend-create` | 冷启动创建朋友 skill | 是 |
-| `friend-update` | 用新语料更新已有 skill | 是 |
-| `friend-list` | 列出现有朋友 skill | 否 |
-| `friend-history` | 看版本和审计历史 | 否 |
+| `friend-create` | 从 JSON 冷启动创建人格 | 是 |
+| `friend-update` | 用新语料更新已有人格 | 是 |
+| `friend-list` | 列出现有人格 | 否 |
+| `friend-history` | 查看版本和审计历史 | 否 |
 | `friend-rollback` | 回滚到指定版本 | 否 |
 | `friend-export` | 导出到 agentskills/codex | 否 |
 | `friend-correct` | 追加纠偏说明（Correction 层） | 否 |
-| `friend-doctor` | 输出运行时诊断信息 | 否 |
+| `friend-doctor` | 查看运行时诊断信息 | 否 |
 
-维护脚本入口：
+脚本运维入口（可选）：
 
 ```bash
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh <intent> [corpus_path] [persona_id]
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh <intent> [corpus_path] [friend_id]
 ```
 
 示例：
 
 ```bash
+# 列出现有人格
 ./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-list
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-history "" laojin
-DISTILL_TO_VERSION=v0003 ./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-rollback "" laojin
+
+# 查看某个人格历史
+./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-history "" <friend_id>
+
+# 回滚到某个版本
+DISTILL_TO_VERSION=<version> ./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-rollback "" <friend_id>
 ```
 
 ---
 
 ## 更新优先策略
 
-### 权重参考
+### 权重建议
 
 | `new-corpus-weight` | 适合场景 | 结果倾向 |
 |---|---|---|
-| `0.10 - 0.30` | 轻微改口头禅/语气 | 强保留旧人格 |
-| `0.40 - 0.60` | 正常迭代 | 新旧平衡 |
-| `0.70 - 1.00` | 阶段性变化 | 快速吸收新特征 |
+| `0.10 - 0.30` | 只想轻微调口吻 | 强保留旧人格 |
+| `0.40 - 0.60` | 常规迭代更新 | 新旧平衡融合 |
+| `0.70 - 1.00` | 人设确实变化很大 | 快速吸收新特征 |
 
-### 这次核心升级
+### 风格保持机制
 
-- 冷启动抽取提示词特化为 **friend object model**。
-- 更新阶段注入已有 skill 的 **style anchors**（表达片段 + 签名词汇）。
-- 再叠加 `new-corpus-weight` 融合，三层一起避免人格漂移。
+- 冷启动：按“朋友对象模型”抽取人格。
+- 更新：先读取已有 skill 风格锚点（style anchors），再融合新语料。
+- 最终：由 `new-corpus-weight` 控制更新幅度，降低人格漂移风险。
 
 ---
 
 ## 多 Host 安装
 
-完整手册见 [INSTALL.md](./INSTALL.md)。
+完整安装与运维手册见 [INSTALL.md](./INSTALL.md)。
 
-支持路径：
-- OpenSkills 一键安装（Claude Code / Codex）
+支持：
+- OpenSkills（Claude Code / Codex）
 - Claude Code 手动挂载（项目级 / 全局）
 - OpenClaw 手动挂载
 
@@ -138,17 +152,15 @@ DISTILL_TO_VERSION=v0003 ./skills/distill-from-corpus-path/scripts/run_friend_co
 
 ## 运行依赖策略
 
-对齐同事/前任 skill 的思路：**可选依赖、按需校验、分层执行**。
-
-- Python 依赖安装是可选但推荐：
+项目采用 optional-first 策略：
 
 ```bash
 pip3 install -r skills/distill-from-corpus-path/runtime/requirements.txt
 ```
 
-- `friend-list/history/rollback/export/correct` 不依赖 LLM，可离线执行。
-- `friend-create/update` 才要求本机 `claude` CLI 可用。
-- 自动依赖自举默认关闭，需要时再开：
+- `friend-list/history/rollback/export/correct` 可在无 LLM 场景执行。
+- `friend-create/update` 才需要本机 `claude` CLI。
+- 自动依赖自举默认关闭，按需开启：
 
 ```bash
 DISTILL_AUTO_BOOTSTRAP=1
@@ -158,7 +170,7 @@ DISTILL_AUTO_BOOTSTRAP=1
 
 ## 运维与验收
 
-一次成功更新建议看这些字段：
+一次成功执行建议检查这些字段：
 
 - `semantic_intent`
 - `workflow_mode`（应为 `agent-led-script-exec`）
@@ -170,60 +182,16 @@ DISTILL_AUTO_BOOTSTRAP=1
 
 ---
 
-## 核心流程图
-
-```mermaid
-flowchart TD
-    A["新语料 JSON"] --> B["friend-update (semantic intent)"]
-    B --> C["orchestrate plan"]
-    C --> D["style-anchored extraction"]
-    D --> E["weighted merge (new-corpus-weight)"]
-    E --> F["validation + eval gates"]
-    F --> G{"pass?"}
-    G -- "yes" --> H["stable version + export"]
-    G -- "no" --> I["quarantined version + rollback ready"]
-```
-
----
-
-## 工程结构
-
-```text
-transform-skill/
-├── README.md
-├── readme_EN.md
-├── readme_JP.md
-├── INSTALL.md
-├── skills/distill-from-corpus-path/
-│   ├── SKILL.md
-│   ├── runtime/src/persona_distill/
-│   └── scripts/
-│       ├── run_friend_command.sh
-│       ├── run_agent_orchestrated.sh
-│       └── run_distill_from_path.sh
-├── src/persona_distill/
-│   ├── semantic_commands.py
-│   ├── extract.py
-│   ├── workflow.py
-│   └── cli.py
-└── tests/
-```
-
----
-
 ## 常见问题
 
-### 我已经挂载 skill 了，为啥还有命令脚本
+### `friend_id` 是什么
 
-两类人都要照顾：
-- 使用者：在会话里直接用自然语言触发。
-- 维护者：需要可重复的命令入口做运维和验收。
+`friend_id` 是你给人格起的唯一标识，用来更新、导出、回滚同一个人格。建议使用英文短横线风格，例如 `friend-alex`。
 
-### 为啥只支持 JSON
+### 必须手动写 `friend_id` 吗
 
-这是当前版本刻意边界。你这次要求是先把交互和生态打磨好，数据接入面暂不扩展。
+不是必须。若不显式提供，系统可从语料文件名自动派生一个 id。生产环境推荐显式指定，便于团队协作。
 
-### 还保留工程 CLI 吗
+### 为什么目前只支持 JSON
 
-保留，但降级为维护入口。主入口是 `friend-*` 语义命令层。
-
+这是当前版本的边界设计：先把交互入口、更新稳定性和生态安装链路做到可靠，再扩展更多数据接入方式。

@@ -1,43 +1,48 @@
 <div align="center">
 
-# transform-skill（中文索引）
+# transform-skill（中文说明）
 
 [中文版入口 README](./README.md) · [English](./readme_EN.md) · [日本語](./readme_JP.md)
 
 </div>
 
-本页是中文索引。完整中文文档、快速开始、语义命令、运维策略都在 [README.md](./README.md)。
+这是中文说明页。完整内容与最新示例以 [README.md](./README.md) 为准。
 
-## 一屏摘要
+## 一屏上手
 
-- 主目标：更新已有 skill，不让新语料推翻旧人格。
-- 冷启动：已特化为“朋友对象模型”。
-- 更新：基于已有 skill 风格锚点 + `new-corpus-weight` 融合。
-- 入口：用户语义命令层（`friend-*`），不是工程 CLI 心智。
-- 多 Host：Claude Code / Codex / OpenClaw，详见 [INSTALL.md](./INSTALL.md)。
-
-## 快速命令
+1. 安装 skill：
 
 ```bash
-# 安装到 Claude Code
+# Claude Code
 npx skills add Xuan-0929/transform-skill --skill distill-from-corpus-path -a claude-code -y
 
-# 安装到 Codex
+# Codex
 npx skills add Xuan-0929/transform-skill --skill distill-from-corpus-path -a codex -y
 ```
 
-```text
-请使用 distill-from-corpus-path，执行 friend-update：
-语料 ./corpus/incoming/week3.json，persona=laojin，新语料权重 0.2，导出 agentskills + codex。
-```
-
-## 运维入口
+2. 准备语料目录：
 
 ```bash
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh <intent> [corpus_path] [persona_id]
+mkdir -p corpus/bootstrap corpus/incoming
 ```
 
-语义命令：
+3. 会话中直接说：
+
+```text
+请使用 distill-from-corpus-path，执行 friend-update：
+语料路径 ./corpus/incoming/<new_corpus>.json，目标 friend_id=<friend_id>，
+新语料权重 0.2，并导出 agentskills 和 codex。
+```
+
+## 关键概念
+
+- `friend_id`：人格唯一 ID（建议英文短横线，例如 `friend-alex`）。
+- `friend-create`：冷启动创建人格。
+- `friend-update`：更新已有人格（推荐主路径）。
+- `new-corpus-weight`：控制新语料影响强度。
+
+## 语义命令总览
+
 - `friend-create`
 - `friend-update`
 - `friend-list`
@@ -47,3 +52,4 @@ npx skills add Xuan-0929/transform-skill --skill distill-from-corpus-path -a cod
 - `friend-correct`
 - `friend-doctor`
 
+多 Host 安装与运维细节见 [INSTALL.md](./INSTALL.md)。
