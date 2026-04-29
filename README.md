@@ -5,7 +5,7 @@
 > “兄弟最近说话变味了，想让 skill 跟着更新？”  
 > “新语料来了，但你不想把原来的人格全推翻？”
 
-[中文版入口](./README.md) · [中文说明页](./readme_CN.md) · [English](./readme_EN.md) · [日本語](./readme_JP.md)
+[中文版入口](./README.md) · [English](./readme_EN.md) · [日本語](./readme_JP.md)
 
 [![Claude Code Skill](https://img.shields.io/badge/Claude_Code-transform--skill-blueviolet?style=for-the-badge)](https://claude.ai/code)
 [![Codex Skill](https://img.shields.io/badge/Codex-transform--skill-black?style=for-the-badge)](https://openai.com/)
