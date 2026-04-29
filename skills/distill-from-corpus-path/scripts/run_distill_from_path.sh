@@ -68,19 +68,6 @@ DISTILL_TARGET_VALUE="${DISTILL_EXPORT_TARGET:-both}"
 DISTILL_FORMAT_VALUE="${DISTILL_FORMAT:-auto}"
 DISTILL_NEW_WEIGHT_VALUE="${DISTILL_NEW_CORPUS_WEIGHT:-}"
 
-if ! command -v claude >/dev/null 2>&1; then
-  echo "Claude CLI not found. Install Claude Code CLI first." >&2
-  exit 2
-fi
-
-if [[ "${DISTILL_PRECHECK_CLAUDE_AUTH:-0}" == "1" && "${DISTILL_SKIP_CLAUDE_AUTH_CHECK:-0}" != "1" ]]; then
-  AUTH_STATUS="$(claude auth status 2>/dev/null || true)"
-  if [[ "$AUTH_STATUS" != *'"loggedIn": true'* ]]; then
-    echo "Claude CLI is not logged in. Run: claude auth login" >&2
-    exit 2
-  fi
-fi
-
 PYTHON_BIN="python3"
 RUNTIME_REQ="$PROJECT_ROOT/requirements.txt"
 if [[ ! -f "$RUNTIME_REQ" && -f "$SKILL_DIR/runtime/requirements.txt" ]]; then

@@ -1,78 +1,69 @@
 ---
 name: distill-from-corpus-path
-description: Use when the user wants to evolve a friend-style skill from JSON corpus paths with update-first behavior, semantic maintenance commands, and optional cold-start creation.
-argument-hint: "[friend-command-or-corpus-path]"
+description: Use when the user is already on the legacy distill-from-corpus-path entry and needs backward-compatible access to friend semantic commands or migration guidance to /transform-skill.
+argument-hint: "[legacy-friend-command-or-corpus-path]"
 user-invocable: true
 allowed-tools: Read, Write, Edit, Bash
 ---
 
-# transform-skill Operator
+# distill-from-corpus-path (Legacy Compatibility)
 
-## Trigger
+## Positioning
 
-Start this skill when the user asks to:
-- distill from a JSON corpus path
-- update an existing friend skill with new corpus
-- manage versions (list/history/rollback/export/correction)
-- keep old style while absorbing new corpus
+This skill is kept for backward compatibility.
 
-## Runtime Positioning
+Primary public entry is now:
+- `/transform-skill` (Claude Code)
+- `transform-skill` (Codex skill call)
 
-- This skill is **agent-led + script-executed**.
-- Data ingestion stays JSON-first (no extra connectors in this skill).
-- Primary operation layer is **semantic friend commands** (not engineering-only CLI).
+If users start from this legacy skill, continue serving them without breaking old flows.
 
-## Semantic Command Layer
+## Legacy Semantic Command Layer
 
-Use `distill friend --intent <intent>` as the canonical interface.
+Supported intents remain unchanged:
 
-| Intent | Meaning | LLM needed |
-|---|---|---|
-| `friend-create` | Cold-start create from corpus | yes |
-| `friend-update` | Update existing skill from new corpus | yes |
-| `friend-list` | List all distilled friends | no |
-| `friend-history` | Show version/audit history | no |
-| `friend-rollback` | Roll back to target version | no |
-| `friend-export` | Export current/target version | no |
-| `friend-correct` | Add correction layer note | no |
-| `friend-doctor` | Show runtime and command guidance | no |
+- `friend-create`
+- `friend-update`
+- `friend-list`
+- `friend-history`
+- `friend-rollback`
+- `friend-export`
+- `friend-correct`
+- `friend-doctor`
 
-## Primary Runner
+## Legacy Runner
 
-- `scripts/run_friend_command.sh`
-  - Usage: `run_friend_command.sh <intent> [corpus_path] [persona_id] [target_speaker]`
-  - Examples:
-    - `run_friend_command.sh friend-create ./corpus/bootstrap/<seed_corpus>.json <friend_id> <target_speaker>`
-    - `run_friend_command.sh friend-update ./corpus/incoming/<new_corpus>.json <friend_id> <target_speaker>`
-    - `run_friend_command.sh friend-history "" <friend_id>`
+```bash
+./scripts/run_friend_command.sh <intent> [corpus_path] [friend_id] [target_speaker]
+```
 
-## Compatibility Runners (Maintainer)
+Examples:
 
-- `scripts/run_agent_orchestrated.sh` (agent-led engineering path)
-- `scripts/run_distill_from_path.sh` (legacy one-shot path)
+```bash
+./scripts/run_friend_command.sh friend-update ./corpus/incoming/<new_corpus>.json <friend_id> <target_speaker>
+./scripts/run_friend_command.sh friend-history "" <friend_id>
+```
 
-## Dependency Strategy (Optional-First)
+## Migration Guidance (Recommended)
 
-- Base requirement: Python 3.10+, local `claude` CLI for LLM intents.
-- Optional deps install:
-  - `pip3 install -r skills/distill-from-corpus-path/runtime/requirements.txt`
-- Auto bootstrap is **off by default**; enable only when needed:
+When appropriate, suggest moving to `/transform-skill` for:
+- unified slash-style entry
+- prompt + tools orchestration layer
+- update-first productized flow
+
+## Runtime Notes
+
+- Base requirement: Python 3.10+.
+- `friend-create` / `friend-update` require active model access in current host session.
+- Optional dependency bootstrap via:
   - `DISTILL_AUTO_BOOTSTRAP=1`
-- Auth precheck is **off by default**; enable for strict ops:
-  - `DISTILL_PRECHECK_CLAUDE_AUTH=1`
 
-## Execution Rules
+## Output Contract
 
-1. Resolve corpus path and persona id.
-2. Prefer semantic intent flow first.
-3. If intent is `friend-update`, keep update-first defaults with controllable `new-corpus-weight`.
-4. If intent is `friend-create`, cold-start with friend-oriented object model.
-5. Return raw JSON plus key fields:
-   - `semantic_intent`, `persona`, `version`, `status`, `workflow_mode`, `plan`, `stages`
-   - export paths when present.
-
-## User Invocation Examples
-
-- `请使用 distill-from-corpus-path，执行 friend-update：语料 ./corpus/incoming/<new_corpus>.json，friend_id=<friend_id>，target_speaker=<target_speaker>，新语料权重 0.2，并导出到 agentskills + codex。`
-- `请使用 distill-from-corpus-path，执行 friend-create：语料 ./corpus/bootstrap/<seed_corpus>.json，friend_id=<friend_id>，target_speaker=<target_speaker>。`
-- `请使用 distill-from-corpus-path，执行 friend-history，friend_id=<friend_id>。`
+Return JSON and highlight:
+- `semantic_intent`
+- `persona`
+- `version`
+- `status`
+- `workflow_mode`
+- export paths when present

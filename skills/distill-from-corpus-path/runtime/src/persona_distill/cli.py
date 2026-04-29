@@ -39,7 +39,11 @@ def _provider_guard(fn):
         return fn()
     except ClaudeCodeAuthError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
-        typer.secho("Hint: run `claude auth login` and retry.", fg=typer.colors.YELLOW, err=True)
+        typer.secho(
+            "Hint: make sure this Claude Code or Codex host session is authenticated, then retry.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
         raise typer.Exit(code=2)
     except ClaudeCodeProviderError as exc:
         typer.secho(f"Claude runtime error: {exc}", fg=typer.colors.RED, err=True)
@@ -399,7 +403,7 @@ def doctor_cmd() -> None:
         "workflow_modes": ["run", "orchestrate"],
         "hints": [
             "Distillation is Claude Code runtime only: no local heuristic switch and no API config path.",
-            "Make sure local Claude CLI is authenticated: `claude auth login`.",
+            "Make sure the current Claude Code/Codex host session has active model access.",
             "User semantic path: `distill friend --intent friend-update --input <path> --persona <id>`.",
             "Cold-start path: `distill friend --intent friend-create --input <path> --persona <id>`.",
             "Engineer path: `distill orchestrate --input <path> --target both`.",

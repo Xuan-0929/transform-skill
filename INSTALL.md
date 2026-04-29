@@ -1,162 +1,128 @@
-# transform-skill Multi-Host Install Manual
+# transform-skill 安装与运维
 
-Last updated: 2026-04-29
+更新日期：2026-04-29
 
-## 0. What You Install
+## 1. 推荐安装（OpenSkills）
 
-- Skill name: `distill-from-corpus-path`
-- Primary interface: `friend-*` semantic intents
-- Data format: JSON corpus path only (by design)
-
-## 1. OpenSkills (Recommended)
-
-### 1.1 Claude Code
+### Claude Code
 
 ```bash
 npx skills add Xuan-0929/transform-skill \
-  --skill distill-from-corpus-path \
+  --skill transform-skill \
   -a claude-code \
   -y
 ```
 
-### 1.2 Codex
+### Codex
 
 ```bash
 npx skills add Xuan-0929/transform-skill \
-  --skill distill-from-corpus-path \
+  --skill transform-skill \
   -a codex \
   -y
 ```
 
-### 1.3 Verify Install
+### 自检
 
 ```bash
 npx skills ls -a claude-code
 npx skills ls -a codex
 ```
 
-## 2. Manual Host Mount
+## 2. 手动挂载（可选）
 
-### 2.1 Claude Code Local Project
-
-Run from your git project root:
+### Claude Code（项目级）
 
 ```bash
 mkdir -p .claude/skills
 git clone https://github.com/Xuan-0929/transform-skill .claude/skills/transform-skill
 ```
 
-### 2.2 Claude Code Global
+### Claude Code（全局）
 
 ```bash
 git clone https://github.com/Xuan-0929/transform-skill ~/.claude/skills/transform-skill
 ```
 
-### 2.3 OpenClaw
+### OpenClaw
 
 ```bash
 git clone https://github.com/Xuan-0929/transform-skill ~/.openclaw/workspace/skills/transform-skill
 ```
 
-## 3. Runtime Dependency Strategy
+## 3. 运行依赖策略
 
-This project follows optional-first dependency policy (same philosophy as colleague/ex):
-
-- Python dependency install is optional but recommended:
+项目采用 optional-first：
 
 ```bash
-pip3 install -r skills/distill-from-corpus-path/runtime/requirements.txt
+pip3 install -r skills/transform-skill/runtime/requirements.txt
 ```
 
-- `claude` CLI is only required for LLM intents:
-  - `friend-create`
-  - `friend-update`
-
-- By default:
-  - `DISTILL_AUTO_BOOTSTRAP=0`
-  - `DISTILL_PRECHECK_CLAUDE_AUTH=0`
-
-- Turn on auto bootstrap if needed:
+- `create` / `update` 需要当前宿主会话具备模型可用权限。
+- `list/history/rollback/export/correct/doctor` 可本地执行。
+- 依赖自动自举默认关闭，按需开启：
 
 ```bash
-DISTILL_AUTO_BOOTSTRAP=1 ./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-doctor
+DISTILL_AUTO_BOOTSTRAP=1
 ```
 
-- Turn on strict auth precheck if your ops policy requires it:
+## 4. 主入口与命令层
+
+用户入口：`/transform-skill`（Claude Code）或 `transform-skill`（Codex）
+
+运维脚本入口（可选）：
 
 ```bash
-DISTILL_PRECHECK_CLAUDE_AUTH=1 ./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-update ./corpus/incoming/<new_corpus>.json <friend_id> <target_speaker>
+./skills/transform-skill/tools/run_transform.sh <action> [options]
 ```
 
-## 4. First Run (Host-Agnostic)
-
-Create corpus folders:
+常用动作：
 
 ```bash
-mkdir -p corpus/bootstrap corpus/incoming
+# update-first
+./skills/transform-skill/tools/run_transform.sh update \
+  --input ./corpus/incoming/<new_corpus>.json \
+  --friend-id <friend_id> \
+  --target-speaker <target_speaker> \
+  --new-corpus-weight 0.2 \
+  --target both
+
+# cold-start (optional)
+./skills/transform-skill/tools/run_transform.sh create \
+  --input ./corpus/bootstrap/<seed_corpus>.json \
+  --friend-id <friend_id> \
+  --target-speaker <target_speaker> \
+  --target both
+
+# maintenance
+./skills/transform-skill/tools/run_transform.sh list
+./skills/transform-skill/tools/run_transform.sh history --friend-id <friend_id>
+./skills/transform-skill/tools/run_transform.sh rollback --friend-id <friend_id> --to-version <version>
+./skills/transform-skill/tools/run_transform.sh export --friend-id <friend_id> --target both
+./skills/transform-skill/tools/run_transform.sh correct --friend-id <friend_id> --correction-text "少一点说教，多一点朋友口吻"
+./skills/transform-skill/tools/run_transform.sh doctor
 ```
 
-Cold-start:
+## 5. 常见问题
 
-```bash
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh \
-  friend-create \
-  ./corpus/bootstrap/<seed_corpus>.json \
-  <friend_id> \
-  <target_speaker>
-```
-
-Update:
-
-```bash
-DISTILL_NEW_CORPUS_WEIGHT=0.2 \
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh \
-  friend-update \
-  ./corpus/incoming/<new_corpus>.json \
-  <friend_id> \
-  <target_speaker>
-```
-
-## 5. Maintenance Commands
-
-```bash
-# list all personas
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-list
-
-# show history
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-history "" <friend_id>
-
-# rollback
-DISTILL_TO_VERSION=v0003 \
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-rollback "" <friend_id>
-
-# export
-DISTILL_EXPORT_TARGET=both \
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-export "" <friend_id>
-
-# add correction note
-DISTILL_CORRECTION_TEXT="少一点说教，多一点兄弟口吻" \
-DISTILL_CORRECTION_SECTION=expression_dna \
-./skills/distill-from-corpus-path/scripts/run_friend_command.sh friend-correct "" <friend_id>
-```
-
-## 6. Troubleshooting
-
-### `Claude CLI not found`
+### 5.1 `runtime command is unavailable in this host session`
 
 ```bash
 npm install -g @anthropic-ai/claude-code
 node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 ```
 
-### `Claude CLI is not authenticated`
+### 5.2 `runtime is not authenticated in the current host session`
+
+先确认你在当前 Claude Code/Codex 会话里能正常对话，再重试 `create`/`update`。
+
+### 5.3 Python 依赖缺失
 
 ```bash
-claude auth login
+pip3 install -r skills/transform-skill/runtime/requirements.txt
 ```
 
-### Python deps missing
+## 6. 兼容入口
 
-```bash
-pip3 install -r skills/distill-from-corpus-path/runtime/requirements.txt
-```
+旧 skill `distill-from-corpus-path` 继续保留，以兼容历史调用。
+新项目统一建议使用 `transform-skill`。

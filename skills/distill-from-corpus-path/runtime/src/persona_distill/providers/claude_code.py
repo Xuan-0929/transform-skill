@@ -109,7 +109,7 @@ class ClaudeCodeProvider(ModelProvider):
         output = (result.text or "").strip()
         if output:
             return output
-        raise ClaudeCodeProviderError("Claude CLI returned empty output.")
+        raise ClaudeCodeProviderError("Claude runtime returned empty output.")
 
     def _run_claude(self, prompt: str) -> ClaudeResult:
         cmd = [self.cli_path, "-p", "--output-format", "text", prompt]
@@ -117,24 +117,29 @@ class ClaudeCodeProvider(ModelProvider):
             cmd.extend(["--model", self.model])
 
         env = os.environ.copy()
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout_sec,
-            env=env,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_sec,
+                env=env,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise ClaudeCodeProviderError(
+                "Claude runtime command is unavailable in this host session."
+            ) from exc
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
         if proc.returncode != 0:
             merged = f"{stdout}\n{stderr}".strip()
             if self._is_auth_error(merged):
                 raise ClaudeCodeAuthError(
-                    "Claude CLI is not authenticated. Run `claude auth login` first."
+                    "Claude runtime is not authenticated in the current host session."
                 )
             raise ClaudeCodeProviderError(
-                f"Claude CLI failed (exit={proc.returncode}): {merged or 'no error text'}"
+                f"Claude runtime command failed (exit={proc.returncode}): {merged or 'no error text'}"
             )
         return ClaudeResult(text=stdout, stderr=stderr, returncode=proc.returncode)
 
