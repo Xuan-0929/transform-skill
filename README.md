@@ -37,6 +37,7 @@
 
 ## 快速导航
 
+- [OpenSkills 一键安装](#openskills-一键安装)
 - [30 秒快速启动](#30-秒快速启动)
 - [核心工作流图](#核心工作流图)
 - [更新优先策略](#更新优先策略)
@@ -45,49 +46,112 @@
 
 ---
 
-## 30 秒快速启动
+## OpenSkills 一键安装
 
-以下示例中的 `<...>` 都是占位符，请替换成你自己的真实值。
-
-### 1) 安装并进入项目
+先看可安装技能：
 
 ```bash
-git clone https://github.com/Xuan-0929/transform-skill.git
-cd transform-skill
+npx skills add Xuan-0929/transform-skill --list
 ```
 
-### 2) 放语料（推荐目录）
+安装到 Claude Code（推荐）：
+
+```bash
+npx skills add Xuan-0929/transform-skill \
+  --skill distill-from-corpus-path \
+  -a claude-code \
+  -y
+```
+
+安装到 Codex：
+
+```bash
+npx skills add Xuan-0929/transform-skill \
+  --skill distill-from-corpus-path \
+  -a codex \
+  -y
+```
+
+说明：
+- 该 skill 已内置运行时（`runtime/src/persona_distill`），OpenSkills 安装后可直接运行
+- 默认会自动自举 Python 依赖（可用 `DISTILL_AUTO_BOOTSTRAP=0` 关闭）
+- 当前蒸馏引擎仍调用本机 `claude` CLI（即使从 Codex 触发，也需要先 `claude auth login`）
+
+### 这仓库为什么能被 OpenSkills 一键安装
+
+按照 `skills` CLI 的官方发现规则，这个仓库已经对齐为可发现、可安装、可执行三件事：
+
+- 可发现：skill 放在 `skills/distill-from-corpus-path/SKILL.md`
+- 可安装：`npx skills add <repo> --list` 能列出 `distill-from-corpus-path`
+- 可执行：skill 内置 `runtime/src/persona_distill`，安装后不依赖仓库源码路径
+- 可跨代理：脚本用相对路径定位 runtime，同时兼容 `DISTILL_PROJECT_ROOT` 覆盖
+
+一句话：不是“只改了 README”，而是把安装链路和运行链路都打通了。
+
+---
+
+## 30 秒快速启动
+
+这部分按 OpenSkills 生态来写：先装载 skill，再在 Claude Code / Codex 会话里直接发任务，不用手动跑 `init/ingest/build`。
+以下 `<...>` 都是占位符，请替换成真实值。
+
+### 1) 装载到你当前使用的 Agent（只做一次）
+
+```bash
+# Claude Code
+npx skills add Xuan-0929/transform-skill --skill distill-from-corpus-path -a claude-code -y
+
+# Codex
+npx skills add Xuan-0929/transform-skill --skill distill-from-corpus-path -a codex -y
+```
+
+### 2) 确认已装载 + 登录运行时（只做一次）
+
+```bash
+npx skills ls -a claude-code
+npx skills ls -a codex
+claude auth login
+```
+
+### 3) 准备语料路径（推荐）
 
 ```bash
 mkdir -p corpus/bootstrap corpus/incoming
 ```
 
-- `corpus/bootstrap/`：第一次建档（冷启动）
-- `corpus/incoming/`：后续新增语料（更新）
+- `corpus/incoming/<new-corpus-file>.json`：更新已有人格（推荐主路径）
+- `corpus/bootstrap/<bootstrap-corpus-file>.json`：从 0 冷启动（可选）
 
-### 3) 登录 Claude 运行时（首次）
+### 4) 在 Claude Code / Codex 会话里直接下任务（推荐）
 
-```bash
-claude auth login
-```
-
-### 4) 直接在 Claude Code 里说（推荐入口）
+更新已有 skill：
 
 ```text
-请使用 distill-from-corpus-path，把 ./corpus/incoming/<new-corpus-file>.json 更新到 persona=<your-persona-id>，新语料权重 0.2
+请使用 distill-from-corpus-path，把 ./corpus/incoming/<new-corpus-file>.json 更新到 persona=<your-persona-id>，新语料权重 0.2，并导出 agentskills 和 codex。
 ```
 
-可选（冷启动）：
+冷启动（可选）：
 
 ```text
-请使用 distill-from-corpus-path，用 ./corpus/bootstrap/<bootstrap-corpus-file>.json 冷启动 persona=<your-persona-id>
+请使用 distill-from-corpus-path，用 ./corpus/bootstrap/<bootstrap-corpus-file>.json 冷启动 persona=<your-persona-id>，并导出 agentskills 和 codex。
 ```
 
-### 5) 或者直接跑命令（CLI 入口）
+### 5) 看结果是否通过验收
+
+你会拿到一段 JSON，重点看这些字段：
+
+- `workflow_mode`（应为 `agent-led-script-exec`）
+- `plan.mode`（`update` 或 `cold_start`）
+- `version`
+- `status`（`stable` / `quarantined`）
+- `export.exports.agentskills`
+- `export.exports.codex`
+
+维护者调试入口（可选）：
 
 ```bash
 DISTILL_NEW_CORPUS_WEIGHT=0.2 \
-./skills/distill-from-corpus-path/scripts/run_distill_from_path.sh \
+./skills/distill-from-corpus-path/scripts/run_agent_orchestrated.sh \
 ./corpus/incoming/<new-corpus-file>.json \
 <your-persona-id>
 ```
@@ -98,24 +162,25 @@ DISTILL_NEW_CORPUS_WEIGHT=0.2 \
 
 ```mermaid
 flowchart TD
-    A[输入新语料\ncorpus/incoming/*.json] --> B[distill-from-corpus-path]
-    B --> C{persona 是否已存在?}
-    C -- 是 --> D[Update 模式\n融合旧人格 + 新语料]
-    C -- 否 --> E[Cold Start 模式\n从 0 蒸馏]
+    A[输入新语料\ncorpus/incoming/*.json] --> B[Agent Orchestrator\ndistill orchestrate]
+    B --> C[脚本执行层\ninit/ingest/update/export]
+    C --> D{persona 是否已存在?}
+    D -- 是 --> E[Update 模式\n融合旧人格 + 新语料]
+    D -- 否 --> F[Cold Start 模式\n从 0 蒸馏]
 
-    D --> F[权重融合\nnew-corpus-weight]
-    E --> G[生成初版人格]
+    E --> G[权重融合\nnew-corpus-weight]
+    F --> H[生成初版人格]
 
-    F --> H[评估与门禁]
-    G --> H
+    G --> I[评估与门禁]
+    H --> I
 
-    H --> I{通过?}
-    I -- 是 --> J[stable 版本]
-    I -- 否 --> K[quarantined 版本]
+    I --> J{通过?}
+    J -- 是 --> K[stable 版本]
+    J -- 否 --> L[quarantined 版本]
 
-    J --> L[导出 AgentSkills]
-    J --> M[导出 Codex]
-    K --> N[保留版本 + 回滚可用]
+    K --> M[导出 AgentSkills]
+    K --> N[导出 Codex]
+    L --> O[保留版本 + 回滚可用]
 ```
 
 ---
@@ -167,7 +232,14 @@ transform-skill/
 ├── skills/
 │   └── distill-from-corpus-path/
 │       ├── SKILL.md
-│       └── scripts/run_distill_from_path.sh
+│       ├── runtime/
+│       │   ├── requirements.txt
+│       │   └── src/persona_distill/
+│       └── scripts/
+│           ├── run_agent_orchestrated.sh
+│           └── run_distill_from_path.sh
+├── scripts/
+│   └── sync_skill_runtime.sh
 └── src/persona_distill/
     ├── cli.py
     ├── workflow.py
@@ -203,6 +275,19 @@ node "$(npm root -g)/@anthropic-ai/claude-code/install.cjs"
 
 ```bash
 export DISTILL_PROJECT_ROOT=/absolute/path/to/transform-skill
+```
+
+### OpenSkills 安装后怎么确认真的可用
+
+```bash
+# 仅检查技能是否可发现
+npx skills add Xuan-0929/transform-skill --list
+
+# 检查脚本入口是否存在（Claude Code）
+ls ./.claude/skills/distill-from-corpus-path/scripts/
+
+# 检查脚本入口是否存在（Codex）
+ls ./.agents/skills/distill-from-corpus-path/scripts/
 ```
 
 ---

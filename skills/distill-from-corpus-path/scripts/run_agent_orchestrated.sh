@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: run_distill_from_path.sh <corpus_path> [persona_id] [speaker]" >&2
+  echo "Usage: run_agent_orchestrated.sh <corpus_path> [persona_id] [speaker]" >&2
   exit 1
 fi
 
@@ -100,7 +100,7 @@ PY
   fi
 fi
 
-CMD=("$PYTHON_BIN" -m persona_distill run --input "$INPUT_PATH" --format "$DISTILL_FORMAT_VALUE" --target "$DISTILL_TARGET_VALUE")
+CMD=("$PYTHON_BIN" -m persona_distill orchestrate --input "$INPUT_PATH" --format "$DISTILL_FORMAT_VALUE" --target "$DISTILL_TARGET_VALUE")
 
 if [[ -n "$PERSONA_ID" ]]; then
   CMD+=(--persona "$PERSONA_ID")
