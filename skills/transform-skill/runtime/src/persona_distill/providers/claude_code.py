@@ -3,15 +3,21 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 from .base import ModelProvider
 
 
 CLI_AUTH_PATTERNS = [
     re.compile(r"not logged in", re.IGNORECASE),
+    re.compile(r"\blogin\b", re.IGNORECASE),
+    re.compile(r"authentication", re.IGNORECASE),
     re.compile(r"please run /login", re.IGNORECASE),
+    re.compile(r"please run .* login", re.IGNORECASE),
     re.compile(r"loggedin['\":\s]*false", re.IGNORECASE),
 ]
 
@@ -31,12 +37,44 @@ class ClaudeResult:
     returncode: int
 
 
-class ClaudeCodeProvider(ModelProvider):
-    """Runtime provider that delegates content operations to local Claude Code CLI."""
+def resolve_runtime_cli(preference: str = "auto") -> str:
+    normalized = (preference or "auto").strip().lower()
+    if normalized not in {"auto", "claude", "codex"}:
+        raise ValueError("DISTILL_RUNTIME_CLI must be one of: auto, claude, codex.")
+    if normalized in {"claude", "codex"}:
+        return normalized
 
-    def __init__(self, cli_path: str = "claude", model: str | None = None, timeout_sec: int = 90) -> None:
-        super().__init__(provider="claude_code", model=model or "default")
-        self.cli_path = cli_path
+    codex_available = shutil.which("codex") is not None
+    claude_available = shutil.which("claude") is not None
+
+    # Prefer host-native CLI when running in Codex desktop/CLI environments.
+    if os.environ.get("CODEX_SHELL") == "1" or os.environ.get("CODEX_THREAD_ID"):
+        if codex_available:
+            return "codex"
+
+    # Backward-compatible fallback order for generic shell contexts.
+    if claude_available:
+        return "claude"
+    if codex_available:
+        return "codex"
+    return "claude"
+
+
+class ClaudeCodeProvider(ModelProvider):
+    """Runtime provider that delegates content operations to host CLI runtime."""
+
+    def __init__(
+        self,
+        cli_path: str | None = None,
+        runtime_cli: str = "auto",
+        model: str | None = None,
+        timeout_sec: int = 90,
+    ) -> None:
+        self.runtime_cli = resolve_runtime_cli(runtime_cli)
+        resolved_cli = (cli_path or self.runtime_cli).strip()
+        provider_name = f"{self.runtime_cli}_cli"
+        super().__init__(provider=provider_name, model=model or "default")
+        self.cli_path = resolved_cli
         self.timeout_sec = max(20, int(timeout_sec))
 
     def refine_claim(self, section: str, candidate: str) -> str:
@@ -105,17 +143,54 @@ class ClaudeCodeProvider(ModelProvider):
         return payload
 
     def _ask_text(self, prompt: str) -> str:
-        result = self._run_claude(prompt)
+        result = self._run_runtime(prompt)
         output = (result.text or "").strip()
         if output:
             return output
-        raise ClaudeCodeProviderError("Claude runtime returned empty output.")
+        raise ClaudeCodeProviderError("Host runtime returned empty output.")
+
+    def _run_runtime(self, prompt: str) -> ClaudeResult:
+        if self.runtime_cli == "codex":
+            return self._run_codex(prompt)
+        return self._run_claude(prompt)
 
     def _run_claude(self, prompt: str) -> ClaudeResult:
         cmd = [self.cli_path, "-p", "--output-format", "text", prompt]
         if self.model and self.model != "default":
             cmd.extend(["--model", self.model])
 
+        return self._run_cmd(cmd, runtime_name="Claude")
+
+    def _run_codex(self, prompt: str) -> ClaudeResult:
+        with tempfile.NamedTemporaryFile(prefix="distill_codex_", suffix=".txt", delete=False) as fp:
+            output_path = Path(fp.name)
+
+        cmd = [
+            self.cli_path,
+            "exec",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--output-last-message",
+            str(output_path),
+            prompt,
+        ]
+        if self.model and self.model != "default":
+            cmd[2:2] = ["--model", self.model]
+
+        try:
+            result = self._run_cmd(cmd, runtime_name="Codex")
+            text = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else ""
+            if text:
+                return ClaudeResult(text=text, stderr=result.stderr, returncode=result.returncode)
+            return result
+        finally:
+            try:
+                output_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    def _run_cmd(self, cmd: list[str], runtime_name: str) -> ClaudeResult:
         env = os.environ.copy()
         try:
             proc = subprocess.run(
@@ -128,7 +203,7 @@ class ClaudeCodeProvider(ModelProvider):
             )
         except FileNotFoundError as exc:
             raise ClaudeCodeProviderError(
-                "Claude runtime command is unavailable in this host session."
+                f"{runtime_name} runtime command is unavailable in this host session."
             ) from exc
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
@@ -136,10 +211,10 @@ class ClaudeCodeProvider(ModelProvider):
             merged = f"{stdout}\n{stderr}".strip()
             if self._is_auth_error(merged):
                 raise ClaudeCodeAuthError(
-                    "Claude runtime is not authenticated in the current host session."
+                    f"{runtime_name} runtime is not authenticated in the current host session."
                 )
             raise ClaudeCodeProviderError(
-                f"Claude runtime command failed (exit={proc.returncode}): {merged or 'no error text'}"
+                f"{runtime_name} runtime command failed (exit={proc.returncode}): {merged or 'no error text'}"
             )
         return ClaudeResult(text=stdout, stderr=stderr, returncode=proc.returncode)
 

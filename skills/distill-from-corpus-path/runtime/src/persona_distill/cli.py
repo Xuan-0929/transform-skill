@@ -46,7 +46,7 @@ def _provider_guard(fn):
         )
         raise typer.Exit(code=2)
     except ClaudeCodeProviderError as exc:
-        typer.secho(f"Claude runtime error: {exc}", fg=typer.colors.RED, err=True)
+        typer.secho(f"Host runtime error: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=2)
 
 
@@ -402,7 +402,7 @@ def doctor_cmd() -> None:
         "single_path": True,
         "workflow_modes": ["run", "orchestrate"],
         "hints": [
-            "Distillation is Claude Code runtime only: no local heuristic switch and no API config path.",
+            "Distillation uses host runtime only (Codex or Claude): no local heuristic switch and no API config path.",
             "Make sure the current Claude Code/Codex host session has active model access.",
             "User semantic path: `distill friend --intent friend-update --input <path> --persona <id>`.",
             "Cold-start path: `distill friend --intent friend-create --input <path> --persona <id>`.",

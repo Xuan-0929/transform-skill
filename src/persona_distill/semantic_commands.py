@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .orchestrator import run_orchestrated_distill
+from .providers import resolve_runtime_spec
 from .repository import PersonaRepository
 from .utils import canonical_skill_name
 from .workflow import add_correction, export_persona, rollback_persona
@@ -117,10 +118,11 @@ def run_semantic_command(
     if intent == "friend-doctor":
         payload = {
             "semantic_intent": intent,
-            "runtime_mode": "runtime:skill",
+            "runtime_mode": resolve_runtime_spec(),
             "llm_required_intents": sorted(LLM_REQUIRED_INTENTS),
             "local_only_intents": sorted(SUPPORTED_SEMANTIC_INTENTS - LLM_REQUIRED_INTENTS),
             "hints": [
+                "Distillation uses host runtime CLI (Codex in Codex, Claude in Claude Code).",
                 "Use friend-create/friend-update when you want distillation.",
                 "Use friend-list/friend-history/friend-rollback/friend-export/friend-correct for maintenance.",
             ],
@@ -202,4 +204,3 @@ def run_semantic_command(
         "requested_mode": "cold_start" if intent == "friend-create" else "update",
         **result,
     }
-
