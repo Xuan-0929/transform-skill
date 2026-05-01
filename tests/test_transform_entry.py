@@ -70,3 +70,28 @@ def test_transform_skill_entry_hides_raw_json_by_default() -> None:
     assert "Return both raw JSON" not in skill_text
     assert "默认不要把完整 JSON" in skill_text
     assert "debug" in skill_text.lower() or "doctor" in skill_text.lower()
+
+def test_run_transform_prefers_python_310_plus_when_python3_is_older_or_broken(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python3 = fake_bin / "python3"
+    fake_python3.write_text("#!/usr/bin/env bash\necho should-not-use-python3 >&2\nexit 99\n", encoding="utf-8")
+    fake_python3.chmod(0o755)
+    (fake_bin / "python3.10").symlink_to(Path(sys.executable))
+
+    env = _env()
+    env["TRANSFORM_WORKSPACE_ROOT"] = str(tmp_path / "workspace")
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+    proc = subprocess.run(
+        ["bash", str(RUNNER), "list"],
+        cwd=str(ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "should-not-use-python3" not in proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["action"] == "list"

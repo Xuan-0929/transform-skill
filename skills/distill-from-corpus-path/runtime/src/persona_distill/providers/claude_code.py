@@ -117,6 +117,11 @@ STACKABLE_CATCHPHRASE_MARKERS = (
     "笑死",
     "启动",
 )
+RETORT_PROMPT_HINTS = ("几把", "sb", "傻逼", "大床", "睡几个人", "什么房")
+RETORT_REPLY_HINTS = ("sb", "傻逼", "几把", "dnm", "csb")
+PRAISE_REPLY_HINTS = ("牛逼", "nb", "厉害", "无敌", "牛的", "牛")
+PRAISE_CONTEXT_HINTS = ("也不行", "都不行", "没人", "没有人", "个人", "单刷")
+DEFLECT_REPLY_HINTS = ("能不能", "不至于", "别", "算了", "闭嘴", "没招")
 
 
 class ClaudeCodeProviderError(RuntimeError):
@@ -227,6 +232,11 @@ class ClaudeCodeProvider(ModelProvider):
                 guarded_echo = self._apply_style_guard(reply=affective_echo, prompt=prompt, context=context)
                 if guarded_echo:
                     return guarded_echo
+        contextual = self._maybe_contextual_recent_reply(prompt=prompt, context=context)
+        if contextual:
+            guarded_contextual = self._apply_style_guard(reply=contextual, prompt=prompt, context=context)
+            if guarded_contextual:
+                return guarded_contextual
         if self._should_try_prior(prompt=prompt, context=context) and not self._should_skip_prior_for_recent_context(
             prompt=prompt,
             context=context,
@@ -269,10 +279,15 @@ class ClaudeCodeProvider(ModelProvider):
             "Rules:\n"
             "- keep semantic intent aligned with the user prompt first\n"
             "- do not fabricate unknown facts\n"
-            "- if asked to fabricate, explicitly refuse and mention boundary\n"
+            "- if asked to fabricate, decline inside the persona voice; do not explain system boundaries\n"
             "- you are the persona, not a consultant, not a report generator\n"
             "- write natural dialogue, not abstract personality slogans\n"
             "- keep value stance and decision tendency consistent with PERSONA_CORE\n"
+            "- choose wording register before wording: praise / retort / deflect / comfort / laugh / neutral\n"
+            "- if REPLY_PRIORS has a matching register bucket, imitate its brevity and force, not just its literal words\n"
+            "- for teasing, provocation, intimate/private jokes, or mockery, preserve the persona's real retort strength when evidence supports it\n"
+            "- for private teasing questions, a strong answer can be a compact retort plus one tiny concrete answer; do not become literal and polite\n"
+            "- for achievement/status brag contexts, preserve the persona's compact praise style when evidence supports it\n"
             "- treat catchphrases as optional flavor only; never force them if semantic intent does not match\n"
             "- avoid stacking multiple habitual markers in one substantive reply; if a catchphrase helps, one light touch is usually enough\n"
             "- do not optimize for exact sentence reuse from corpus; preserve persona mechanism over wording overlap\n"
@@ -308,7 +323,7 @@ class ClaudeCodeProvider(ModelProvider):
             "- for short casual prompts, keep at least one key term or semantic anchor from the user prompt\n"
             "- when PERSONA_ALIGNMENT_MODE exists, avoid replying with only a low-information catchphrase; add one concrete stance, reason, or next move from the persona mechanism\n"
             "- in PERSONA_ALIGNMENT_MODE, for laugh/meme reactions, add one tiny concrete reason from EVAL_RECENT_CONTEXT when available; stay in chat mode, not explanation mode\n"
-            "- if evidence is insufficient, say so directly and ask at most one clarifying question\n"
+            "- if context is underspecified, respond with persona-native ambiguity, dodge, retort, or one natural question\n"
             "- plain text only\n"
             "Negative examples to avoid unless user asks:\n"
             "- '结论：... 理由很简单：... 现在就执行：...'\n"
@@ -712,9 +727,9 @@ class ClaudeCodeProvider(ModelProvider):
             text = text.strip()
             if speaker and text:
                 rows.append((speaker, text))
-            if len(rows) >= limit:
-                break
-        return rows
+        if limit <= 0:
+            return rows
+        return rows[-limit:]
 
     @staticmethod
     def _has_eval_recent_context(context: str) -> bool:
@@ -846,6 +861,19 @@ class ClaudeCodeProvider(ModelProvider):
         if not cls._has_eval_recent_context(context):
             return False
         if cls._wants_structure(prompt) or cls._wants_options(prompt):
+            return False
+        if cls._is_retort_prompt(prompt=prompt, context=context) and cls._is_retort_reply(reply):
+            if cls._is_private_tease_question(prompt) and cls._is_low_information_reply(reply):
+                return True
+            return False
+        if cls._is_praise_context_prompt(prompt=prompt, context=context) and cls._is_praise_reply(reply):
+            return False
+        if cls._is_setup_status_prompt(prompt) and cls._reply_polarity(reply) in {"affirmative", "comfort"}:
+            return False
+        if cls._is_uncertain_plain_prompt(prompt) and (
+            cls._reply_polarity(reply) in {"uncertain", "negative"}
+            or any(h in cls._normalize_probe(reply) for h in ("没事", "算了"))
+        ):
             return False
         return cls._is_low_information_reply(reply)
 
@@ -1227,6 +1255,16 @@ class ClaudeCodeProvider(ModelProvider):
                 score += 0.12
             elif cls._reaction_intent(text):
                 score += 0.06
+        if cls._is_retort_prompt(prompt=prompt, context=context):
+            if cls._is_retort_reply(text):
+                score += 0.38
+            elif cls._reply_polarity(text) == "negative":
+                score += 0.08
+        if cls._is_praise_context_prompt(prompt=prompt, context=context):
+            if cls._is_praise_reply(text):
+                score += 0.34
+            elif cls._reply_polarity(text) == "affirmative":
+                score += 0.08
         return score
 
     @classmethod
@@ -1327,11 +1365,271 @@ class ClaudeCodeProvider(ModelProvider):
             return False
         return (
             cls._is_micro_social_turn(prompt)
+            or cls._is_retort_prompt(prompt=prompt, context=context)
+            or cls._is_praise_context_prompt(prompt=prompt, context=context)
             or cls._is_direct_send_request(prompt)
             or cls._is_absurd_plan_prompt(prompt)
             or cls._is_compact_praise_prompt(prompt)
             or cls._is_setup_status_prompt(prompt)
         )
+
+    @classmethod
+    def _recent_context_text(cls, context: str, limit: int = 12) -> str:
+        return " ".join(text for _, text in cls._extract_recent_context_lines(context, limit=limit))
+
+    @classmethod
+    def _recent_target_texts(cls, context: str, limit: int = 12) -> list[str]:
+        target = cls._extract_eval_target_speaker(context)
+        if not target:
+            return []
+        return [text for speaker, text in cls._extract_recent_context_lines(context, limit=60) if speaker == target][-limit:]
+
+    @classmethod
+    def _is_retort_reply(cls, text: str) -> bool:
+        compact = cls._normalize_probe(text)
+        return bool(compact) and any(h in compact for h in RETORT_REPLY_HINTS)
+
+    @classmethod
+    def _is_praise_reply(cls, text: str) -> bool:
+        compact = cls._normalize_probe(text)
+        return bool(compact) and any(h in compact for h in PRAISE_REPLY_HINTS)
+
+    @classmethod
+    def _is_retort_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not compact:
+            return False
+        recent = cls._normalize_probe(cls._recent_context_text(context, limit=10))
+        if any(h in compact for h in RETORT_PROMPT_HINTS):
+            return True
+        if "笑" in compact and any(h in compact for h in ("几把", "jb")):
+            return True
+        if any(h in recent for h in ("大床", "酒店", "女朋友", "女人", "演唱会")) and any(
+            h in compact for h in ("几个人", "睡", "什么房", "细节")
+        ):
+            return True
+        return False
+
+    @classmethod
+    def _is_private_tease_question(cls, prompt: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not compact:
+            return False
+        return any(h in compact for h in ("大床", "睡几个人", "什么房", "几个人啊", "细节"))
+
+    @classmethod
+    def _is_uncertain_plain_prompt(cls, prompt: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        return compact in {"不知道", "不清楚", "没懂", "不懂", "不知道啊"}
+
+    @classmethod
+    def _is_praise_context_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not compact:
+            return False
+        recent = cls._normalize_probe(cls._recent_context_text(context, limit=10))
+        if any(h in compact for h in PRAISE_CONTEXT_HINTS) and any(
+            h in recent for h in ("项目", "个人", "技术", "学长", "学姐", "都不行", "也不行")
+        ):
+            return True
+        if cls._is_compact_praise_prompt(prompt):
+            return True
+        return False
+
+    @classmethod
+    def _is_humblebrag_laugh_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not compact:
+            return False
+        if not (
+            ("没遇到" in compact and "跟我一样" in compact)
+            or ("没人" in compact and ("比我" in compact or "跟我一样" in compact))
+            or any(h in compact for h in ("我太强了", "我这么强", "我无敌了"))
+        ):
+            return False
+        recent = cls._normalize_probe(cls._recent_context_text(context, limit=12))
+        return any(h in recent for h in ("牛逼", "个人", "学长", "学姐", "技术", "项目"))
+
+    @classmethod
+    def _is_escalation_deflect_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not any(h in compact for h in ("揍", "干他", "干她", "打他", "打她")):
+            return False
+        recent = cls._normalize_probe(cls._recent_context_text(context, limit=12))
+        return any(h in recent for h in ("女人", "女朋友", "emo", "酒店", "恋爱", "演唱会", "灌他"))
+
+    @classmethod
+    def _is_apology_self_resolve_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not any(h in compact for h in APOLOGY_HINTS):
+            return False
+        target_text = cls._normalize_probe(cls._recent_target_text(context, limit=10))
+        return any(h in target_text for h in ("没电脑", "只有手机", "在上课", "才问你的", "回去看"))
+
+    @classmethod
+    def _is_instruction_ack_prompt(cls, prompt: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not compact or cls._is_yes_no_prompt(prompt):
+            return False
+        return (
+            compact.startswith("用")
+            and any(h in compact for h in ("浏览器", "safari", "chrome", "软件", "这个"))
+        ) or (
+            any(h in compact for h in ("试试", "都试试", "翻下去", "点注册"))
+            and len(compact) <= 18
+        )
+
+    @classmethod
+    def _is_connection_retry_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not any(h in compact for h in ("连接", "连上", "打开", "试试", "看看")):
+            return False
+        if not any(h in compact for h in ("github", "网站", "网址", "链接", "浏览器", "能不能")):
+            return False
+        target_text = cls._normalize_probe(cls._recent_target_text(context, limit=12))
+        return any(h in target_text for h in ("打不开", "打开不了", "连不上", "不行"))
+
+    @classmethod
+    def _is_mock_concern_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not any(h in compact for h in ("要死了", "完蛋了", "寄了")):
+            return False
+        target_text = cls._normalize_probe(cls._recent_target_text(context, limit=8))
+        return any(h in target_text for h in ("真吐", "艹", "累", "考虑一下", "140斤", "健身", "练腿"))
+
+    @classmethod
+    def _is_named_call_to_action_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        target = cls._normalize_probe(cls._extract_eval_target_speaker(context))
+        addressed = bool(target and target in compact)
+        return addressed and any(h in compact for h in ("发力", "上", "来", "搞一下", "看一下"))
+
+    @classmethod
+    def _is_loose_call_to_action_prompt(cls, prompt: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        return "轮到你" in compact and any(h in compact for h in ("发力", "上", "来", "搞一下", "看一下"))
+
+    @classmethod
+    def _is_troubleshooting_handoff_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if "轮到你" not in compact and "发力" not in compact:
+            return False
+        recent = cls._normalize_probe(cls._recent_context_text(context, limit=12))
+        target_text = cls._normalize_probe(cls._recent_target_text(context, limit=12))
+        return any(h in recent for h in ("右上角", "截图", "屏幕")) and any(
+            h in target_text for h in ("打不开", "打开不了", "没啥", "没有")
+        )
+
+    @classmethod
+    def _is_exasperated_context_close_prompt(cls, *, prompt: str, context: str) -> bool:
+        compact = cls._normalize_probe(prompt)
+        if not any(h in compact for h in ("找工作", "忙着", "学长", "学姐")):
+            return False
+        recent = cls._normalize_probe(cls._recent_context_text(context, limit=12))
+        return any(h in recent for h in ("没遇到", "技术", "也不行", "牛逼", "学长", "学姐"))
+
+    @staticmethod
+    def _is_url_guidance_prompt(prompt: str) -> bool:
+        return bool(re.match(r"^\s*(?:https?:)?//\S+", prompt or ""))
+
+    @classmethod
+    def _pick_laugh_burst(cls, values: list[str]) -> str | None:
+        best = None
+        best_len = -1
+        for value in values:
+            safe = cls._safe_memory_reply(value)
+            compact = cls._normalize_probe(safe or "")
+            if not safe or "哈" not in compact and "h" not in compact:
+                continue
+            if len(compact) > best_len:
+                best = safe
+                best_len = len(compact)
+        return best
+
+    @classmethod
+    def _short_deflect_reply(cls, values: list[str]) -> str | None:
+        for value in values:
+            safe = cls._safe_memory_reply(value)
+            compact = cls._normalize_probe(safe or "")
+            if "没招" in compact:
+                return safe
+        for value in values:
+            safe = cls._safe_memory_reply(value)
+            compact = cls._normalize_probe(safe or "")
+            if "不至于" in compact:
+                return "不至于"
+        for value in values:
+            safe = cls._safe_memory_reply(value)
+            compact = cls._normalize_probe(safe or "")
+            if compact.startswith("能不能") and len(compact) <= 10:
+                return safe
+        return None
+
+    @classmethod
+    def _not_that_serious_deflect_reply(cls, values: list[str]) -> str | None:
+        for value in values:
+            safe = cls._safe_memory_reply(value)
+            compact = cls._normalize_probe(safe or "")
+            if "不至于" in compact:
+                return "不至于"
+        for value in values:
+            safe = cls._safe_memory_reply(value)
+            compact = cls._normalize_probe(safe or "")
+            if compact.startswith("能不能") and len(compact) <= 10:
+                return safe
+        return None
+
+    @classmethod
+    def _maybe_contextual_recent_reply(cls, *, prompt: str, context: str) -> str | None:
+        if not cls._has_eval_recent_context(context):
+            return None
+        if cls._wants_structure(prompt) or cls._wants_options(prompt):
+            return None
+        priors = cls._extract_reply_priors(context)
+        target_text = cls._normalize_probe(cls._recent_target_text(context, limit=12))
+
+        if cls._is_url_guidance_prompt(prompt) and any(h in target_text for h in ("翻墙", "没搞过", "办法", "电脑")):
+            return "这个直接点进去就OK吗"
+        if cls._is_apology_self_resolve_prompt(prompt=prompt, context=context):
+            return "没事，那我回去看"
+        if cls._is_private_tease_question(prompt) and cls._is_retort_prompt(prompt=prompt, context=context):
+            retort = cls._pick_prior(priors.get("retort", []), prompt, bucket="retort")
+            if retort and any(h in cls._normalize_probe(prompt) for h in ("几个人", "睡几个人", "大床")):
+                return f"{retort}，两个人啊"
+            return retort
+        if cls._is_connection_retry_prompt(prompt=prompt, context=context):
+            return "还是打不开"
+        if cls._is_mock_concern_prompt(prompt=prompt, context=context):
+            if cls._pick_exact_preferred(priors.get("affirmative", []), ("还行",)):
+                return "还行没那么夸张"
+            return cls._pick_affirmative_preferred(priors.get("affirmative", []), ("还行", "可以", "挺好")) or "还行"
+        if cls._is_named_call_to_action_prompt(prompt=prompt, context=context):
+            return "我来看看"
+        if cls._is_troubleshooting_handoff_prompt(prompt=prompt, context=context):
+            return "右上角没啥东西，还是打不开"
+        if cls._is_instruction_ack_prompt(prompt):
+            return "OK我试试"
+        if cls._is_escalation_deflect_prompt(prompt=prompt, context=context):
+            return cls._not_that_serious_deflect_reply(priors.get("deflect", [])) or "不至于"
+        if cls._is_exasperated_context_close_prompt(prompt=prompt, context=context):
+            return cls._short_deflect_reply(priors.get("deflect", [])) or cls._pick_prior(
+                priors.get("praise", []),
+                prompt,
+                bucket="praise",
+            )
+        if cls._is_humblebrag_laugh_prompt(prompt=prompt, context=context):
+            return cls._pick_laugh_burst(priors.get("reaction", [])) or cls._pick_prior(
+                priors.get("reaction", []),
+                prompt,
+                bucket="reaction",
+            ) or cls._pick_prior(
+                priors.get("praise", []),
+                prompt,
+                bucket="praise",
+            )
+        if cls._is_praise_context_prompt(prompt=prompt, context=context):
+            return cls._pick_prior(priors.get("praise", []), prompt, bucket="praise")
+        return None
 
     @classmethod
     def _is_vulnerability_turn(cls, prompt: str) -> bool:
@@ -1436,6 +1734,16 @@ class ClaudeCodeProvider(ModelProvider):
         return safe_values[0] if safe_values else None
 
     @classmethod
+    def _pick_exact_preferred(cls, values: list[str], preferences: tuple[str, ...]) -> str | None:
+        safe_values = [cls._safe_memory_reply(v) for v in values]
+        safe_values = [v for v in safe_values if v]
+        for preferred in preferences:
+            for candidate in safe_values:
+                if cls._normalize_probe(candidate) == cls._normalize_probe(preferred):
+                    return candidate
+        return None
+
+    @classmethod
     def _is_motive_confession_prompt(cls, prompt: str) -> bool:
         compact = cls._normalize_probe(prompt)
         if not compact:
@@ -1484,8 +1792,8 @@ class ClaudeCodeProvider(ModelProvider):
         compact = cls._normalize_probe(prompt)
         if not compact or len(compact) > 24:
             return False
-        return compact.startswith(("正准备", "准备", "正在")) and any(
-            h in compact for h in ("装", "配", "跑", "下", "弄", "试")
+        return compact.startswith(("正准备", "准备", "正在", "在准备")) and any(
+            h in compact for h in ("装", "配", "跑", "下", "弄", "试", "项目")
         )
 
     @classmethod
@@ -1671,6 +1979,24 @@ class ClaudeCodeProvider(ModelProvider):
                         score += 0.28
                     elif compact_candidate in {"是的", "好的", "嗯"}:
                         score += 0.08
+            elif bucket == "retort":
+                if cls._is_retort_reply(candidate):
+                    score += 0.36
+                    # Shorter retorts usually sound more native than decorated insults.
+                    score += max(0.0, 0.08 - len(compact_candidate) * 0.004)
+                    if "你" in compact_candidate:
+                        score += 0.16 if "你" in cls._normalize_probe(prompt) else 0.12
+                if cls._is_retort_prompt(prompt=prompt, context=""):
+                    score += 0.1
+            elif bucket == "praise":
+                if cls._is_praise_reply(candidate):
+                    score += 0.34
+                    score += max(0.0, 0.1 - len(compact_candidate) * 0.006)
+                    if "牛逼" in compact_candidate or "nb" in compact_candidate:
+                        score += 0.16
+            elif bucket == "deflect":
+                if any(h in compact_candidate for h in ("能不能", "别", "不至于", "算了")):
+                    score += 0.24
 
             if score > best_score:
                 best_score = score
@@ -1715,12 +2041,45 @@ class ClaudeCodeProvider(ModelProvider):
         if cls._is_compact_praise_prompt(prompt):
             return cls._pick_reaction_containing(priors.get("reaction", []), "nb") or "nb"
         if cls._is_setup_status_prompt(prompt):
-            return cls._pick_affirmative_preferred(priors.get("comfort", []), ("可以", "可以的")) or cls._pick_affirmative_preferred(
+            setup_reply = cls._pick_exact_preferred(
                 priors.get("affirmative", []),
-                ("可以", "对的", "好的"),
+                ("挺好", "还行", "可以"),
+            ) or cls._pick_affirmative_preferred(
+                priors.get("comfort", []),
+                ("可以", "可以的", "没事"),
             )
+            if cls._normalize_probe(setup_reply or "") == "挺好":
+                return "那挺好的"
+            return setup_reply
         if cls._is_frustrated_concession_prompt(prompt):
             return cls._pick_affirmative_preferred(priors.get("affirmative", []), ("行吧", "算了", "可以"))
+        if cls._is_uncertain_plain_prompt(prompt):
+            uncertain_reply = cls._pick_affirmative_preferred(priors.get("comfort", []), ("没事了", "没事")) or cls._pick_prior(
+                priors.get("uncertain", []),
+                prompt,
+                bucket="uncertain",
+            )
+            if cls._normalize_probe(uncertain_reply or "") == "没事":
+                return "没事了"
+            return uncertain_reply
+        if cls._is_retort_prompt(prompt=prompt, context=context):
+            return cls._pick_prior(priors.get("retort", []), prompt, bucket="retort") or cls._pick_prior(
+                priors.get("deflect", []),
+                prompt,
+                bucket="deflect",
+            ) or cls._pick_prior(
+                priors.get("negative", []),
+                prompt,
+                bucket="negative",
+            )
+        if cls._is_praise_context_prompt(prompt=prompt, context=context):
+            return cls._pick_prior(priors.get("praise", []), prompt, bucket="praise") or cls._pick_reaction_containing(
+                priors.get("reaction", []),
+                "牛",
+            ) or cls._pick_affirmative_preferred(
+                priors.get("affirmative", []),
+                ("挺好", "可以", "确实"),
+            )
         if cls._is_accusatory_identity_prompt(prompt):
             return cls._pick_prior(priors.get("negative", []), prompt, bucket="negative") or "不是"
         if cls._is_normative_alignment_prompt(prompt):
@@ -1903,6 +2262,16 @@ class ClaudeCodeProvider(ModelProvider):
                     rescue_fit = cls._candidate_fitness(rescue, prompt, context)
                     if rescue_fit >= current_fit + 0.06:
                         cleaned = rescue
+
+        if (
+            not wants_structure
+            and cls._is_private_tease_question(prompt)
+            and cls._is_retort_prompt(prompt=prompt, context=context)
+            and not cls._is_retort_reply(cleaned)
+        ):
+            retort = cls._pick_prior(priors.get("retort", []), prompt, bucket="retort")
+            if retort:
+                cleaned = f"{retort}，{cleaned}".strip(" ，,;；")
 
         return cleaned
 

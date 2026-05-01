@@ -26,11 +26,14 @@ DECISION_INTENT_HINTS = (
     "复盘",
 )
 
-AFFIRMATIVE_REPLY_HINTS = ("是的", "对的", "可以", "好的", "好滴", "行", "行吧", "也行", "ok", "OK", "对", "嗯", "确实", "还真是", "是啊", "对啊")
+AFFIRMATIVE_REPLY_HINTS = ("是的", "对的", "可以", "好的", "好滴", "行", "行吧", "也行", "ok", "OK", "对", "嗯", "确实", "还真是", "是啊", "对啊", "挺好")
 NEGATIVE_REPLY_HINTS = ("不是", "没有", "没呢", "不行", "不对", "别", "算了", "不太")
 UNCERTAIN_REPLY_HINTS = ("不好说", "难说", "不知道", "看情况", "不确定", "大概")
 REACTION_REPLY_HINTS = ("笑死", "哈哈", "我去", "卧槽", "完了", "离谱", "逆天", "可恶")
 COMFORT_REPLY_HINTS = ("没事", "别慌", "慢慢来", "稳", "可以")
+PRAISE_REPLY_HINTS = ("牛逼", "nb", "厉害", "无敌", "牛的", "牛")
+RETORT_REPLY_HINTS = ("sb", "傻逼", "几把", "dnm", "csb")
+DEFLECT_REPLY_HINTS = ("能不能", "不至于", "别", "算了", "闭嘴", "没招")
 STYLE_MEMORY_MARKERS = ("还真是", "笑死", "完了", "卧槽", "哈哈", "可以", "是的", "难说", "不知道", "好滴")
 GENERIC_OVERLAP_TOKENS = {"有点", "这个", "那个", "就是", "真的", "现在", "然后", "还真是", "太", "很"}
 GENERIC_STYLE_CUES = {
@@ -54,15 +57,23 @@ GENERIC_STYLE_CUES = {
 def load_benchmark(path: Path | None) -> EvalBenchmark:
     if path is None or not path.exists():
         return EvalBenchmark(
-            name="default-minimal",
+            name="default-persona-smoke",
             cases=[
                 EvalCase(
                     id="default-1",
-                    prompt="Give a recommendation with tradeoffs.",
-                    expected_output="recommendation with tradeoffs",
+                    prompt="最近怎么样",
+                    expected_output=None,
                     assertions=[
-                        {"type": "contains", "value": "tradeoff", "critical": True},
-                        {"type": "contains", "value": "recommend", "critical": True},
+                        {"type": "not_contains", "value": "AI", "critical": True},
+                        {"type": "not_contains", "value": "语料", "critical": True},
+                        {"type": "not_contains", "value": "证据不足", "critical": True},
+                        {"type": "not_contains", "value": "稳定信息不足", "critical": True},
+                        {"type": "not_contains", "value": "我不能编", "critical": True},
+                        {"type": "not_contains", "value": "模型限制", "critical": True},
+                        {"type": "not_contains", "value": "运行规则", "critical": True},
+                        {"type": "not_contains", "value": "persona context", "critical": True},
+                        {"type": "not_contains", "value": "generic answer", "critical": True},
+                        {"type": "not_contains", "value": "caveats", "critical": True},
                     ],
                 )
             ],
@@ -128,9 +139,27 @@ def _norm_text(text: str) -> str:
     return re.sub(r"\s+", "", text or "").strip().lower()
 
 
+def _is_laugh_burst(text: str) -> bool:
+    cleaned = _norm_text(text)
+    if not cleaned:
+        return False
+    laugh_chars = re.sub(r"[哈h啊a😂🤣]", "", cleaned)
+    return not laugh_chars and len(cleaned) <= 24 and ("哈" in cleaned or "h" in cleaned)
+
+
 def _classify_short_reply(reply: str) -> str | None:
     cleaned = _norm_text(reply)
-    if not cleaned or len(cleaned) > 6:
+    if not cleaned:
+        return None
+    if _is_laugh_burst(reply):
+        return "reaction"
+    if any(h in cleaned for h in RETORT_REPLY_HINTS):
+        return "retort" if len(cleaned) <= 16 else None
+    if any(h in cleaned for h in PRAISE_REPLY_HINTS):
+        return "praise" if len(cleaned) <= 12 else None
+    if any(h in cleaned for h in DEFLECT_REPLY_HINTS):
+        return "deflect" if len(cleaned) <= 18 else None
+    if len(cleaned) > 6:
         return None
     if any(p in reply for p in ("，", ",", "。", ";", "；", "、")) and len(cleaned) > 6:
         return None
@@ -154,6 +183,9 @@ def _build_reply_priors(profile: PersonaProfile, per_bucket_limit: int = 5) -> d
         "uncertain": {},
         "reaction": {},
         "comfort": {},
+        "praise": {},
+        "retort": {},
+        "deflect": {},
     }
 
     def _add_reply(reply: str, weight: int) -> None:
@@ -168,6 +200,8 @@ def _build_reply_priors(profile: PersonaProfile, per_bucket_limit: int = 5) -> d
         _add_reply(pair.get("reply", ""), weight=2)
     for text in profile.style_memory[:160]:
         _add_reply(text, weight=1)
+    for text in profile.signature_lexicon[:160]:
+        _add_reply(text, weight=1)
 
     priors: dict[str, list[str]] = {}
     for bucket, mapping in bucket_freq.items():
@@ -176,11 +210,17 @@ def _build_reply_priors(profile: PersonaProfile, per_bucket_limit: int = 5) -> d
             norm = _norm_text(text)
             if bucket in {"affirmative", "negative", "uncertain"} and len(norm) > 4:
                 continue
-            if bucket == "reaction" and len(norm) > 6:
+            if bucket == "reaction" and len(norm) > 6 and not _is_laugh_burst(text):
+                continue
+            if bucket == "praise" and len(norm) > 12:
+                continue
+            if bucket == "retort" and len(norm) > 16:
+                continue
+            if bucket == "deflect" and len(norm) > 18:
                 continue
             if bucket == "negative" and ("可能" in norm or "不是没有" in norm):
                 continue
-            if re.search(r"[a-zA-Z]", text) and norm not in {"ok"}:
+            if re.search(r"[a-zA-Z]", text) and norm not in {"ok"} and bucket != "retort":
                 continue
             if bucket == "affirmative" and "要么" in norm:
                 continue

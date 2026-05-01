@@ -23,6 +23,8 @@ class PersonaRepository:
         for item in self.base_dir.iterdir():
             if not item.is_dir():
                 continue
+            if item.name.startswith(".") or ".backup-" in item.name:
+                continue
             if (item / "state.json").exists():
                 personas.append(item.name)
         return sorted(personas)

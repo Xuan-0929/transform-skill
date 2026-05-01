@@ -73,7 +73,43 @@ ERR
   exit 2
 fi
 
-PYTHON_BIN="python3"
+python_supports_runtime() {
+  local candidate="$1"
+  "$candidate" - <<'PY' >/dev/null 2>&1
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+}
+
+select_python_bin() {
+  local candidate=""
+  local resolved=""
+
+  if [[ -n "${PYTHON_BIN:-}" ]]; then
+    if python_supports_runtime "$PYTHON_BIN"; then
+      echo "$PYTHON_BIN"
+      return 0
+    fi
+    echo "PYTHON_BIN must point to Python >= 3.10: $PYTHON_BIN" >&2
+    return 1
+  fi
+
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    if ! command -v "$candidate" >/dev/null 2>&1; then
+      continue
+    fi
+    resolved="$(command -v "$candidate")"
+    if python_supports_runtime "$resolved"; then
+      echo "$resolved"
+      return 0
+    fi
+  done
+
+  echo "Cannot find Python >= 3.10. transform-skill requires Python 3.10+." >&2
+  return 1
+}
+
+PYTHON_BIN="$(select_python_bin)"
 RUNTIME_REQ="$RUNTIME_ROOT/requirements.txt"
 if [[ -f "$RUNTIME_REQ" ]]; then
   if ! PYTHONPATH="$RUNTIME_ROOT/src${PYTHONPATH:+:$PYTHONPATH}" \
@@ -82,7 +118,7 @@ import typer, pydantic, yaml
 PY
   then
     if [[ "${DISTILL_AUTO_BOOTSTRAP:-0}" == "1" ]]; then
-      VENV_DIR="$RUNTIME_ROOT/.venv"
+      VENV_DIR="${DISTILL_VENV_DIR:-$RUNTIME_ROOT/.venv-py310}"
       if [[ ! -x "$VENV_DIR/bin/python" ]]; then
         "$PYTHON_BIN" -m venv "$VENV_DIR"
       fi

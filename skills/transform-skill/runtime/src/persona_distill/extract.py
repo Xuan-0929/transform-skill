@@ -25,7 +25,21 @@ BELIEF_PATTERNS = ["我觉得", "我认为", "我感觉", "我只要", "我更",
 DECISION_PATTERNS = ["先", "再", "然后", "如果", "就", "优先", "回头", "不如"]
 MODEL_PATTERNS = ["因为", "所以", "相当于", "等于", "本质", "逻辑", "意味着", "说明", "归根结底"]
 ANTI_PATTERNS = ["不", "别", "不能", "不要", "没必要", "不想", "不会"]
-STYLE_MARKERS = ["哈哈", "笑死", "绷", "离谱", "有点", "真", "太", "？", "！", "呜呜", "捏"]
+STYLE_MARKERS = ["哈哈", "笑死", "绷", "离谱", "有点", "真", "太", "？", "！", "呜呜", "捏", "牛逼", "nb", "sb"]
+DISTINCTIVE_SHORT_UTTERANCES = {
+    "牛逼",
+    "牛",
+    "nb",
+    "无敌",
+    "无敌了",
+    "你sb吧",
+    "这sb",
+    "遇到sb了",
+    "dnmd",
+    "dnmdcsb",
+    "笑死",
+    "笑死我了",
+}
 HEDGE_WORDS = ["可能", "大概", "也许", "差不多", "应该"]
 NOISE_KEYWORDS = [
     "复制打开抖音",
@@ -227,6 +241,7 @@ def _build_signature_lexicon(items: list[CorpusItem], limit: int = 30) -> list[s
     for item in items:
         if not _is_valid_utterance(item.content):
             continue
+        compact = re.sub(r"\s+", "", item.content.lower())
         for tok in tokenize(item.content):
             if len(tok) < 2:
                 continue
@@ -241,6 +256,10 @@ def _build_signature_lexicon(items: list[CorpusItem], limit: int = 30) -> list[s
             if not re.search(r"[\u4e00-\u9fff]", tok):
                 continue
             counter[tok] += 1
+            if tok.lower() in DISTINCTIVE_SHORT_UTTERANCES or tok.lower() in compact and any(
+                marker in compact for marker in ("牛逼", "nb", "sb")
+            ):
+                counter[tok] += 4
     return [tok for tok, _ in counter.most_common(limit)]
 
 
@@ -287,6 +306,8 @@ def _is_fragmentary_style_text(text: str) -> bool:
     if not compact:
         return True
     # keep very short reaction words in reply priors, but avoid using them as core style anchors.
+    if len(compact) <= 8 and lowered in DISTINCTIVE_SHORT_UTTERANCES:
+        return False
     if len(compact) <= 4 and lowered not in {"完了", "卧槽", "笑死", "不是", "没有", "难说", "稀有"}:
         return True
     if lowered in LOW_SIGNAL_REPLY_CANONICAL:
@@ -345,6 +366,8 @@ def _is_persona_signal_text(text: str, *, allow_brief: bool = False) -> bool:
         return False
     if lowered in LOW_SIGNAL_REPLY_CANONICAL and not allow_brief:
         return False
+    if lowered in DISTINCTIVE_SHORT_UTTERANCES:
+        return True
     if re.fullmatch(r"(哈|哈哈|哈哈哈|啊|嗯|哦|ok|111|233|666)+", lowered):
         return False
     if len(normalized) <= 3 and not allow_brief:

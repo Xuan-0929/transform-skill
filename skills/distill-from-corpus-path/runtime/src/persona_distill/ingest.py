@@ -16,6 +16,9 @@ SPEAKER_LINE_RE = re.compile(
 MEDIA_PLACEHOLDER_RE = re.compile(r"^\[(图片|视频|文件|语音|卡片消息|表情).+\]$")
 REPLY_PREFIX_RE = re.compile(r"^\[回复 [^\]]+\]\s*")
 SUPPORTED_INPUT_SUFFIXES = {".json", ".csv", ".txt", ".md"}
+INLINE_TIMESTAMP_RE = re.compile(
+    r"^(?:\d{4}[-/])?\d{1,2}[-/]\d{1,2}\s+\d{1,2}:\d{2}(?::\d{2})?$"
+)
 
 
 def detect_format(path: Path, declared: str) -> str:
@@ -108,25 +111,68 @@ def _clean_content_text(text: str) -> str:
     return cleaned
 
 
+def _looks_like_inline_timestamp(text: str) -> bool:
+    cleaned = text.strip()
+    return bool(INLINE_TIMESTAMP_RE.match(cleaned)) or parse_timestamp(cleaned) is not None
+
+
 def _records_from_text(path: Path) -> list[dict[str, Any]]:
     text = path.read_text(encoding="utf-8")
     records: list[dict[str, Any]] = []
+    pending_speaker: str | None = None
+    pending_timestamp: str | None = None
+    pending_lines: list[str] = []
+
+    def flush_pending() -> None:
+        nonlocal pending_speaker, pending_timestamp, pending_lines
+        if pending_speaker and pending_lines:
+            records.append(
+                {
+                    "speaker": pending_speaker,
+                    "content": _clean_content_text("\n".join(pending_lines)),
+                    "timestamp": pending_timestamp,
+                    "recalled": False,
+                    "system": False,
+                }
+            )
+        pending_speaker = None
+        pending_timestamp = None
+        pending_lines = []
+
     for line in text.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
         match = SPEAKER_LINE_RE.match(stripped)
         if match:
+            speaker = match.group("speaker").strip()
+            content = _clean_content_text(match.group("content") or "")
+            timestamp = match.group("ts")
+            # Some chat exports use:
+            #   Speaker: 2025-12-12 01:05:13
+            #   message body on the next line
+            # Treat the first line as metadata, not as the speaker's content.
+            if not timestamp and _looks_like_inline_timestamp(content):
+                flush_pending()
+                pending_speaker = speaker
+                pending_timestamp = content
+                pending_lines = []
+                continue
+
+            flush_pending()
             records.append(
                 {
-                    "speaker": match.group("speaker").strip(),
-                    "content": _clean_content_text(match.group("content") or ""),
-                    "timestamp": match.group("ts"),
+                    "speaker": speaker,
+                    "content": content,
+                    "timestamp": timestamp,
                     "recalled": False,
                     "system": False,
                 }
             )
         else:
+            if pending_speaker:
+                pending_lines.append(stripped)
+                continue
             records.append(
                 {
                     "speaker": "unknown",
@@ -136,6 +182,7 @@ def _records_from_text(path: Path) -> list[dict[str, Any]]:
                     "system": False,
                 }
             )
+    flush_pending()
     return records
 
 

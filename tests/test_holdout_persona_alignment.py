@@ -102,3 +102,6 @@ def test_holdout_can_report_persona_alignment_judge_score(tmp_path: Path) -> Non
     assert report["passed"] is True
     assert report["examples"][0]["persona_alignment"] == 0.84
     assert "遇到风险先刹车" in provider.judge_prompts[0]
+    assert "Do not penalize compact replies solely for being low-information" in provider.judge_prompts[0]
+    assert "laugh-only or reaction-only replies" in provider.judge_prompts[0]
+    assert "median_chars_per_turn" in provider.judge_prompts[0]

@@ -53,3 +53,17 @@ def test_friend_correct_and_history(tmp_path: Path) -> None:
     assert history_payload["history_count"] >= 1
     assert any(event.get("event") == "correction" for event in history_payload["history"])
 
+def test_friend_list_hides_backup_persona_directories(tmp_path: Path) -> None:
+    repo = PersonaRepository(tmp_path)
+    repo.init_persona("jc")
+    repo.init_persona("jc.backup-20260501-151505")
+
+    payload = run_semantic_command(
+        repo=repo,
+        provider=None,
+        request=SemanticRequest(intent="friend-list"),
+    )
+
+    assert payload["count"] == 1
+    assert [friend["persona"] for friend in payload["friends"]] == ["jc"]
+

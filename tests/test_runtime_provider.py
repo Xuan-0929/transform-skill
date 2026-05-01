@@ -1020,3 +1020,269 @@ def test_generate_response_rewrites_context_disconnected_memory_fragment(
 
     assert reply == "还真是，8000一瓶已经不是人间局了"
     assert any("DISCONNECTED_FRAGMENT_FIX" in prompt for prompt in prompts)
+
+def test_generate_response_uses_retort_prior_for_private_teasing_without_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    monkeypatch.setattr(provider, "_ask_text", lambda _: (_ for _ in ()).throw(AssertionError("LLM should not be needed")))
+    context = (
+        "[REPLY_PRIORS]\n"
+        "- retort: 你sb吧 | 这sb\n"
+        "- praise: 牛逼\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 极客小猪: 你笑几把\n"
+        "[PERSONA_ALIGNMENT_MODE]\n"
+        "- prefer persona mechanism over exact short reply\n"
+    )
+
+    assert provider.generate_response("你笑几把", context) == "你sb吧"
+
+
+def test_generate_response_uses_praise_prior_for_humblebrag_context_without_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    monkeypatch.setattr(provider, "_ask_text", lambda _: (_ for _ in ()).throw(AssertionError("LLM should not be needed")))
+    context = (
+        "[REPLY_PRIORS]\n"
+        "- praise: 牛逼 | 牛\n"
+        "- affirmative: 挺好\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: 学长学姐也不行吗\n"
+        "- 极客小猪: 也不行\n"
+        "[PERSONA_ALIGNMENT_MODE]\n"
+        "- prefer persona mechanism over exact short reply\n"
+    )
+
+    assert provider.generate_response("也不行", context) == "牛逼"
+
+def test_generate_response_grounds_private_tease_retort_without_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    prompts: list[str] = []
+
+    def _fake_ask(prompt: str) -> str:
+        prompts.append(prompt)
+        return "你是不是sb，两个人啊"
+
+    monkeypatch.setattr(provider, "_ask_text", _fake_ask)
+    context = (
+        "[REPLY_PRIORS]\n"
+        "- retort: 你sb吧 | 这sb\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 极客小猪: 大床上睡几个人啊\n"
+        "[PERSONA_ALIGNMENT_MODE]\n"
+        "- prefer persona mechanism over exact short reply\n"
+    )
+
+    assert provider.generate_response("大床上睡几个人啊", context) == "你sb吧，两个人啊"
+    assert prompts == []
+
+def test_generate_response_uses_status_and_uncertain_variants_without_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    monkeypatch.setattr(provider, "_ask_text", lambda _: (_ for _ in ()).throw(AssertionError("LLM should not be needed")))
+    status_context = "[REPLY_PRIORS]\n- affirmative: 挺好 | 还行\n[PERSONA_ALIGNMENT_MODE]\n- x\n[EVAL_RECENT_CONTEXT]\n- 极客小猪: 在准备项目\n"
+    unknown_context = "[REPLY_PRIORS]\n- comfort: 没事\n[PERSONA_ALIGNMENT_MODE]\n- x\n[EVAL_RECENT_CONTEXT]\n- 极客小猪: 不知道\n"
+
+    assert provider.generate_response("在准备项目", status_context) == "那挺好的"
+    assert provider.generate_response("不知道", unknown_context) == "没事了"
+
+
+def test_recent_context_lines_keep_latest_turns_for_register_choice() -> None:
+    context = (
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: OK\n"
+        "- 极客小猪: 不好意思\n"
+        "- 橘柚: 那我回去看\n"
+        "- 极客小猪: 在准备项目\n"
+        "- 橘柚: 那挺好的\n"
+        "- 极客小猪: 个人\n"
+        "- 橘柚: 牛逼\n"
+        "- 极客小猪: 没遇到技术跟我一样的\n"
+        "- 橘柚: 哈哈哈哈哈哈哈哈哈\n"
+        "- 橘柚: 学长学姐也不行吗\n"
+        "- 极客小猪: 也不行\n"
+    )
+
+    rows = ClaudeCodeProvider._extract_recent_context_lines(context, limit=4)
+
+    assert [text for _, text in rows] == ["没遇到技术跟我一样的", "哈哈哈哈哈哈哈哈哈", "学长学姐也不行吗", "也不行"]
+
+
+def test_generate_response_uses_latest_context_for_praise_and_laugh_without_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    monkeypatch.setattr(provider, "_ask_text", lambda _: (_ for _ in ()).throw(AssertionError("LLM should not be needed")))
+    context = (
+        "[REPLY_PRIORS]\n"
+        "- affirmative: 挺好 | 还行\n"
+        "- praise: 牛逼 | 无敌了\n"
+        "- reaction: 哈哈哈哈哈哈哈哈哈 | 笑死我了\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: OK\n"
+        "- 极客小猪: 不好意思\n"
+        "- 橘柚: 那我回去看\n"
+        "- 极客小猪: 在准备项目\n"
+        "- 橘柚: 那挺好的\n"
+        "- 极客小猪: 个人\n"
+        "- 橘柚: 牛逼\n"
+        "- 极客小猪: 没遇到技术跟我一样的\n"
+        "- 橘柚: 哈哈哈哈哈哈哈哈哈\n"
+        "- 橘柚: 学长学姐也不行吗\n"
+        "- 极客小猪: 也不行\n"
+        "[PERSONA_ALIGNMENT_MODE]\n"
+        "- prefer persona mechanism over exact short reply\n"
+    )
+
+    assert provider.generate_response("也不行", context) == "牛逼"
+    assert provider.generate_response("没遇到技术跟我一样的", context) == "哈哈哈哈哈哈哈哈哈"
+
+
+def test_generate_response_contextual_repairs_common_live_thread_turns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    monkeypatch.setattr(provider, "_ask_text", lambda _: (_ for _ in ()).throw(AssertionError("LLM should not be needed")))
+    base_context = (
+        "[REPLY_PRIORS]\n"
+        "- affirmative: 挺好 | 还行\n"
+        "- comfort: 没事\n"
+        "- deflect: 但不至于你想的那么离谱\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: 我在上课\n"
+        "- 橘柚: 没电脑\n"
+        "- 橘柚: 只有手机\n"
+        "- 橘柚: 才问你的\n"
+        "- 极客小猪: 不好意思\n"
+        "[PERSONA_ALIGNMENT_MODE]\n"
+        "- prefer persona mechanism over exact short reply\n"
+    )
+    retry_context = (
+        "[REPLY_PRIORS]\n"
+        "- affirmative: 挺好 | 还行\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: 打不开\n"
+        "- 极客小猪: 用safari浏览器\n"
+        "- 橘柚: OK\n"
+        "- 橘柚: 还是打开不了\n"
+        "- 极客小猪: 你连接github.com看看能不能连上\n"
+    )
+    gym_context = (
+        "[REPLY_PRIORS]\n"
+        "- affirmative: 挺好 | 还行\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: 140斤\n"
+        "- 橘柚: 真吐了\n"
+        "- 橘柚: 我再考虑一下\n"
+        "- 橘柚: 艹了\n"
+        "- 极客小猪: 你要死了\n"
+    )
+
+    assert provider.generate_response("不好意思", base_context) == "没事，那我回去看"
+    assert provider.generate_response("你连接github.com看看能不能连上", retry_context) == "还是打不开"
+    assert provider.generate_response("你要死了", gym_context) == "还行没那么夸张"
+
+
+def test_generate_response_contextual_ack_and_deflect_without_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    monkeypatch.setattr(provider, "_ask_text", lambda _: (_ for _ in ()).throw(AssertionError("LLM should not be needed")))
+    context = (
+        "[REPLY_PRIORS]\n"
+        "- affirmative: 挺好 | 还行\n"
+        "- deflect: 但不至于你想的那么离谱\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: 打不开\n"
+        "- 极客小猪: 用safari浏览器\n"
+        "- 橘柚: 11号和她去杭州看演唱会\n"
+        "- 极客小猪: 我替你去揍她\n"
+    )
+
+    assert provider.generate_response("用safari浏览器", context) == "OK我试试"
+    assert provider.generate_response("我替你去揍她", context) == "不至于"
+
+
+def test_generate_response_uses_corpus_deflect_for_exasperated_context_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    monkeypatch.setattr(provider, "_ask_text", lambda _: (_ for _ in ()).throw(AssertionError("LLM should not be needed")))
+    context = (
+        "[REPLY_PRIORS]\n"
+        "- praise: 牛逼 | 无敌了\n"
+        "- deflect: 那我没招了 | 不至于\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: 牛逼\n"
+        "- 极客小猪: 没遇到技术跟我一样的\n"
+        "- 橘柚: 学长学姐也不行吗\n"
+        "- 极客小猪: 也不行\n"
+        "- 极客小猪: 学长学姐忙着找工作\n"
+    )
+
+    assert provider.generate_response("学长学姐忙着找工作", context) == "那我没招了"
+
+
+def test_generate_response_keeps_troubleshooting_handoff_in_same_speaker_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    monkeypatch.setattr(provider, "_ask_text", lambda _: (_ for _ in ()).throw(AssertionError("LLM should not be needed")))
+    context = (
+        "[REPLY_PRIORS]\n"
+        "- affirmative: 挺好 | 还行\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: 点了还是打不开\n"
+        "- 极客小猪: 你把右上角截图\n"
+        "- 极客小猪: 屏幕右上角\n"
+        "- 极客小猪: jc 轮到你发力了\n"
+    )
+
+    assert provider.generate_response("jc 轮到你发力了", context) == "右上角没啥东西，还是打不开"
+
+
+def test_private_tease_readds_retort_when_grounded_rewrite_gets_too_polite(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = ClaudeCodeProvider(cli_path="codex", runtime_cli="codex")
+    monkeypatch.setattr(provider, "_ask_text", lambda _: "两个人啊，不然呢")
+    context = (
+        "[REPLY_PRIORS]\n"
+        "- retort: 你sb吧 | 这sb\n"
+        "[EVAL_TARGET_SPEAKER]\n"
+        "橘柚\n"
+        "[EVAL_RECENT_CONTEXT]\n"
+        "- 橘柚: 酒店都订好了\n"
+        "- 极客小猪: 大床上睡几个人啊\n"
+        "[PERSONA_ALIGNMENT_MODE]\n"
+        "- prefer persona mechanism over exact short reply\n"
+    )
+
+    assert provider.generate_response("大床上睡几个人啊", context) == "你sb吧，两个人啊"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from persona_distill.models import PersonaProfile
+from persona_distill.models import EvidenceClaim, EvidenceSpan, PersonaProfile
 from persona_distill.providers.base import ModelProvider
 from persona_distill.synthesize import render_skill_package
 
@@ -69,10 +69,12 @@ def test_skill_markdown_uses_conversation_first_contract(tmp_path: Path) -> None
     assert "## Layer 0：硬规则（最高优先级）" in skill_text
     assert "## 原声回复锚点（强约束）" in skill_text
     assert "你就是这个人，不是客服，不是咨询师，不是教程生成器。" in skill_text
-    assert "执行优先级：Layer 0 > 对话形态约束 > 原声锚点与场景示例 > 其他规则。" in skill_text
+    assert "执行优先级：Layer 0 > PART B 人格判断 > PART A 记忆锚点 > 对话形态约束 > 其他规则。" in skill_text
     assert "避免“结论：/理由很简单：/现在就执行：”这类报告口吻。" in skill_text
     assert "先给结论，再给理由，再给可执行动作。" not in skill_text
     assert "至少引用了1条心智模型或决策启发式。" not in skill_text
+    assert "默认 1-2 句" not in skill_text
+    assert "回复长度跟语境走" in skill_text
     assert "MUST NOT 无依据扩写具体名词清单（菜名、店名、行程等）。" in skill_text
 
 
@@ -124,3 +126,81 @@ def test_render_skill_finalizes_minimum_persona_contract(tmp_path: Path) -> None
     assert len(profile.decision_rules) >= 5
     skill_text = (output_dir / "SKILL.md").read_text(encoding="utf-8")
     assert skill_text.count("### 模型") >= 2
+
+
+def test_skill_markdown_enforces_embodied_roleplay_not_ai_boundary(tmp_path: Path) -> None:
+    output_dir = tmp_path / "skill"
+    render_skill_package(
+        profile=_profile(),
+        output_dir=output_dir,
+        provider=_StubProvider(),
+        persona_name="friend-demo",
+    )
+    skill_text = (output_dir / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "你就是 friend-demo，不是 AI 助手" in skill_text
+    assert "evidence linkage" not in skill_text
+    assert "boundary honesty" not in skill_text
+    assert "先由 PART B 判断" in skill_text
+    assert "再由 PART A 补充" in skill_text
+    assert "内部判断" in skill_text
+    assert "稳定信息不足" not in skill_text
+    assert "我不能编" not in skill_text
+    assert "语料没给" not in skill_text
+    assert "MUST 在证据不足时显式声明不确定性。" not in skill_text
+    assert "遇到证据不足，不要硬演" not in skill_text
+    assert "最多给最小动作并说明缺什么信息" not in skill_text
+
+
+def test_skill_markdown_filters_extraction_diagnostics_from_runtime(tmp_path: Path) -> None:
+    profile = _profile()
+    profile.style_memory = ["01-07 03:55:06", "你先吃，别跟我演减肥。"]
+    profile.context_reply_memory = [
+        {"context": "01-07 03:55:06", "reply": "01-07 03:55:09"},
+        {"context": "晚上吃什么", "reply": "你就点个热的，别空腹硬扛。"},
+    ]
+    profile.sections["beliefs_and_values"] = [
+        EvidenceClaim(
+            id="claim-diagnostic",
+            section="beliefs_and_values",
+            claim="仅有“代表性表达”和时间戳，缺少具体内容，无法提炼 beliefs_and_values。",
+            confidence=0.4,
+            evidence=[
+                EvidenceSpan(
+                    item_id="style_memory",
+                    excerpt="你先吃，别跟我演减肥。",
+                )
+            ],
+        )
+    ]
+    profile.sections["mental_models"] = [
+        EvidenceClaim(
+            id="claim-meta-thin",
+            section="mental_models",
+            claim="只凭一句“无所谓”，证据太薄，推不出稳定心智模型。",
+            confidence=0.4,
+            evidence=[
+                EvidenceSpan(
+                    item_id="style_memory",
+                    excerpt="你先吃，别跟我演减肥。",
+                )
+            ],
+        )
+    ]
+    output_dir = tmp_path / "skill"
+    render_skill_package(
+        profile=profile,
+        output_dir=output_dir,
+        provider=_StubProvider(),
+        persona_name="friend-demo",
+    )
+    skill_text = (output_dir / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "无法提炼" not in skill_text
+    assert "无有效内容" not in skill_text
+    assert "仅有“代表性表达”" not in skill_text
+    assert "证据太薄" not in skill_text
+    assert "推不出" not in skill_text
+    assert "01-07 03:55:06" not in skill_text
+    assert "> 「你先吃，别跟我演减肥。」" in skill_text
+    assert "- 别人说：晚上吃什么" in skill_text
