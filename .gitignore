@@ -13,3 +13,7 @@ __pycache__/
 .DS_Store
 
 *.egg-info/
+
+# Private corpora and validation artifacts
+/data/
+/tmp_eval/

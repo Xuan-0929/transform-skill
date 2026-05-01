@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import typer
@@ -51,6 +52,9 @@ def _provider_guard(fn):
 
 
 def _repo() -> PersonaRepository:
+    workspace_root = os.environ.get("TRANSFORM_WORKSPACE_ROOT")
+    if workspace_root:
+        return PersonaRepository(Path(workspace_root).expanduser())
     return PersonaRepository(Path.cwd())
 
 
@@ -75,7 +79,7 @@ def init(persona_id: str = typer.Argument(..., help="Persona identifier")) -> No
 @app.command()
 def ingest(
     persona: str = typer.Option(..., "--persona", help="Persona identifier"),
-    input_path: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=False),
+    input_path: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=True),
     fmt: str = typer.Option("auto", "--format", help="auto|text|json|csv"),
     speaker: str | None = typer.Option(None, "--speaker", help="Only ingest messages from this speaker"),
 ) -> None:
@@ -105,7 +109,7 @@ def build(
 
 @app.command("run")
 def run_cmd(
-    input_path: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=False),
+    input_path: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=True),
     persona: str | None = typer.Option(
         None,
         "--persona",
@@ -164,7 +168,7 @@ def run_cmd(
 
 @app.command("orchestrate")
 def orchestrate_cmd(
-    input_path: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=False),
+    input_path: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=True),
     persona: str | None = typer.Option(
         None,
         "--persona",
@@ -240,11 +244,14 @@ def eval_cmd(
 @app.command("eval-holdout")
 def eval_holdout_cmd(
     persona: str = typer.Option(..., "--persona", help="Persona identifier"),
-    input_path: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=False),
+    input_path: Path = typer.Option(..., "--input", exists=True, file_okay=True, dir_okay=True),
     speaker: str | None = typer.Option(None, "--speaker", help="Target speaker name in holdout corpus"),
     version: str | None = typer.Option(None, "--version", help="Target version, defaults to current"),
     max_cases: int = typer.Option(16, "--max-cases", help="Max context cases for evaluation"),
     min_refs: int = typer.Option(2, "--min-refs", help="Min reply variants per prompt context"),
+    context_turns: int = typer.Option(30, "--context-turns", min=1, max=60, help="Recent dialogue turns added to holdout prompt context"),
+    judge_persona_alignment: bool = typer.Option(False, "--judge-persona-alignment", help="Use host runtime to judge persona/value alignment beyond lexical overlap"),
+    min_persona_alignment: float = typer.Option(0.0, "--min-persona-alignment", min=0.0, max=1.0, help="Pass threshold for persona alignment judge when enabled"),
     min_avg_similarity: float = typer.Option(0.2, "--min-avg", help="Pass threshold: agent avg similarity"),
     min_delta: float = typer.Option(0.12, "--min-delta", help="Pass threshold: delta vs baseline"),
     output_name: str = typer.Option(
@@ -270,6 +277,9 @@ def eval_holdout_cmd(
             target_speaker=target_speaker,
             max_cases=max_cases,
             min_refs=min_refs,
+            context_turns=context_turns,
+            judge_persona_alignment=judge_persona_alignment,
+            min_persona_alignment=min_persona_alignment,
             min_avg_similarity=min_avg_similarity,
             min_delta_vs_baseline=min_delta,
         )
@@ -284,7 +294,7 @@ def eval_holdout_cmd(
 @app.command()
 def update(
     persona: str = typer.Option(..., "--persona", help="Persona identifier"),
-    input_path: Path | None = typer.Option(None, "--input", exists=False, file_okay=True, dir_okay=False),
+    input_path: Path | None = typer.Option(None, "--input", exists=False, file_okay=True, dir_okay=True),
     fmt: str = typer.Option("auto", "--format", help="auto|text|json|csv"),
     speaker: str | None = typer.Option(None, "--speaker", help="Only ingest messages from this speaker"),
     new_corpus_weight: float = typer.Option(

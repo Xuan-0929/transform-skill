@@ -30,6 +30,42 @@ def _ensure_persona(repo: PersonaRepository, persona_id: str) -> None:
         raise ValueError(f"Persona '{persona_id}' not found. Run `distill init {persona_id}` first.")
 
 
+def _speaker_histogram(items: list[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for item in items:
+        speaker = str(getattr(item, "speaker", "") or "").strip()
+        if not speaker:
+            continue
+        counts[speaker] = counts.get(speaker, 0) + 1
+    return counts
+
+
+def _resolve_target_speaker(
+    items: list[Any],
+    *,
+    requested_speaker: str | None,
+    state_speaker: str | None,
+    persona_id: str,
+) -> str:
+    counts = _speaker_histogram(items)
+
+    requested = (requested_speaker or "").strip()
+    if requested and (not counts or requested in counts):
+        return requested
+
+    persisted = (state_speaker or "").strip()
+    if persisted and persisted in counts:
+        return persisted
+
+    if persona_id in counts:
+        return persona_id
+
+    if counts:
+        return max(counts.items(), key=lambda x: x[1])[0]
+
+    return requested or persisted or persona_id
+
+
 def ingest_corpus(
     repo: PersonaRepository,
     persona_id: str,
@@ -370,6 +406,7 @@ def _build_common(
     persona_id: str,
     eval_suite: Path | None,
     merge_with_previous: bool,
+    requested_target_speaker: str | None = None,
 ) -> dict:
     _ensure_persona(repo, persona_id)
     items = repo.load_corpus_items(persona_id)
@@ -377,6 +414,16 @@ def _build_common(
         raise ValueError("No corpus items found. Run ingest first.")
 
     state = repo.load_state(persona_id)
+    resolved_target_speaker = _resolve_target_speaker(
+        items,
+        requested_speaker=requested_target_speaker,
+        state_speaker=state.target_speaker,
+        persona_id=persona_id,
+    )
+    if state.target_speaker != resolved_target_speaker:
+        state.target_speaker = resolved_target_speaker
+        repo.save_state(persona_id, state)
+
     previous_profile = None
     if merge_with_previous and state.current_version:
         previous_profile = repo.load_profile(persona_id, state.current_version)
@@ -391,7 +438,7 @@ def _build_common(
         items=items,
         corrections=corrections,
         provider=provider,
-        target_speaker=persona_id,
+        target_speaker=resolved_target_speaker,
         profile_mode="style_anchored_update" if previous_profile is not None else "friend_cold_start",
         style_anchor_profile=previous_profile,
     )
@@ -465,6 +512,7 @@ def _build_common(
             "conflict_count": conflict_count,
             "status": status,
             "gate_reasons": eval_comparison.reasons,
+            "target_speaker": resolved_target_speaker,
         }
     )
 
@@ -491,6 +539,7 @@ def _build_common(
             "changed_sections": changed_sections,
             "rollback": state_result["rollback"],
             "distill_mode": "agent",
+            "target_speaker": resolved_target_speaker,
             "pass_rate": eval_comparison.with_skill.pass_rate,
             "baseline_pass_rate": eval_comparison.baseline.pass_rate,
         },
@@ -509,6 +558,7 @@ def _build_common(
         "baseline_pass_rate": eval_comparison.baseline.pass_rate,
         "rollback": state_result["rollback"],
         "distill_mode": "agent",
+        "target_speaker": resolved_target_speaker,
         "output_dir": str(vdir),
     }
 
@@ -523,6 +573,7 @@ def build_persona(
         persona_id,
         eval_suite=eval_suite,
         merge_with_previous=False,
+        requested_target_speaker=None,
     )
 
 
@@ -540,14 +591,16 @@ def update_persona(
     _ensure_persona(repo, persona_id)
     accepted_delta_items = []
     if input_path is not None:
-        ingested_items = ingest_file(input_path, fmt, speaker_filter=speaker_filter)
+        # Keep all speakers in corpus so target replies still have real dialogue context.
+        ingested_items = ingest_file(input_path, fmt, speaker_filter=None)
         accepted_count, accepted_delta_items = repo.append_corpus_items_with_items(persona_id, ingested_items)
         repo.append_audit(
             persona_id,
             {
                 "event": "ingest",
                 "input_path": str(input_path),
-                "speaker_filter": speaker_filter,
+                "speaker_filter": None,
+                "requested_target_speaker": speaker_filter,
                 "detected_items": len(ingested_items),
                 "accepted_items": accepted_count,
             },
@@ -555,15 +608,29 @@ def update_persona(
     if correction:
         add_correction(repo, persona_id, correction_section, correction)
 
+    state = repo.load_state(persona_id)
+    all_items = repo.load_corpus_items(persona_id)
+    resolved_target_speaker = _resolve_target_speaker(
+        all_items,
+        requested_speaker=speaker_filter,
+        state_speaker=state.target_speaker,
+        persona_id=persona_id,
+    )
+    if state.target_speaker != resolved_target_speaker:
+        state.target_speaker = resolved_target_speaker
+        repo.save_state(persona_id, state)
+
+    has_target_delta = any(i.speaker == resolved_target_speaker for i in accepted_delta_items)
+
     # Weighted incremental update path:
     # if a current version exists and we are adding new corpus only,
     # distill from the delta corpus and blend with prior persona.
-    state = repo.load_state(persona_id)
     if (
         input_path is not None
         and correction is None
         and state.current_version is not None
         and accepted_delta_items
+        and has_target_delta
     ):
         previous_profile = repo.load_profile(persona_id, state.current_version)
         version = repo.next_version(persona_id)
@@ -575,7 +642,7 @@ def update_persona(
             items=accepted_delta_items,
             corrections=corrections,
             provider=provider,
-            target_speaker=persona_id,
+            target_speaker=resolved_target_speaker,
             profile_mode="style_anchored_update",
             style_anchor_profile=previous_profile,
         )
@@ -645,6 +712,7 @@ def update_persona(
                 "gate_reasons": eval_comparison.reasons,
                 "new_corpus_weight": round(_clamp_new_corpus_weight(new_corpus_weight), 3),
                 "delta_items": len(accepted_delta_items),
+                "target_speaker": resolved_target_speaker,
             }
         )
         repo.save_version_artifacts(
@@ -673,6 +741,7 @@ def update_persona(
                 "baseline_pass_rate": eval_comparison.baseline.pass_rate,
                 "new_corpus_weight": round(_clamp_new_corpus_weight(new_corpus_weight), 3),
                 "delta_items": len(accepted_delta_items),
+                "target_speaker": resolved_target_speaker,
             },
         )
         return {
@@ -691,6 +760,7 @@ def update_persona(
             "output_dir": str(vdir),
             "new_corpus_weight": round(_clamp_new_corpus_weight(new_corpus_weight), 3),
             "delta_items": len(accepted_delta_items),
+            "target_speaker": resolved_target_speaker,
         }
 
     return _build_common(
@@ -698,6 +768,7 @@ def update_persona(
         persona_id,
         eval_suite=eval_suite,
         merge_with_previous=True,
+        requested_target_speaker=resolved_target_speaker,
     )
 
 

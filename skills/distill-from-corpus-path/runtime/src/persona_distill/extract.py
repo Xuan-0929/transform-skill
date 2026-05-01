@@ -61,6 +61,69 @@ STOPWORDS = {
     "hr",
 }
 
+LOW_SIGNAL_LEXICON = {
+    "是的",
+    "可以",
+    "可以的",
+    "没有",
+    "不知道",
+    "等下",
+    "看看",
+    "差不多",
+    "应该不是",
+    "这个人",
+    "然后",
+    "就是",
+}
+
+LOW_SIGNAL_CONTEXTS = {
+    "这个",
+    "那个",
+    "这个呢",
+    "那个呢",
+    "是的",
+    "好的",
+    "好滴",
+    "嗯",
+    "哦",
+    "啊",
+    "哈",
+    "哈哈",
+    "没有",
+    "哈哈没有",
+    "有吗",
+    "ok",
+    "+1",
+    "111",
+}
+
+NON_PERSONA_MEME_HINTS = {
+    "疯狂星期四",
+    "v我50",
+    "v我 50",
+    "kfc",
+    "复制这条",
+    "今日疯四",
+    "转发抽奖",
+    "仅聊天",
+    "互关",
+}
+
+MAX_CONTEXT_GAP_SECONDS = 3 * 60 * 60
+
+LOW_SIGNAL_REPLY_CANONICAL = {
+    "是的",
+    "好的",
+    "好滴",
+    "可以",
+    "嗯",
+    "哦",
+    "哈",
+    "哈哈",
+    "ok",
+    "111",
+}
+
 MODEL_THEME_KEYWORDS: dict[str, list[str]] = {
     "risk_control": ["风险", "不该", "别", "不要", "不能", "稳", "保", "收手", "谨慎", "输", "高"],
     "evidence_boundary": ["证据", "确定", "不确定", "判断", "信息", "依据", "真假", "怀疑"],
@@ -169,6 +232,8 @@ def _build_signature_lexicon(items: list[CorpusItem], limit: int = 30) -> list[s
                 continue
             if tok in STOPWORDS:
                 continue
+            if tok in LOW_SIGNAL_LEXICON:
+                continue
             if tok.isdigit():
                 continue
             if len(tok) > 10:
@@ -188,6 +253,10 @@ def _build_style_memory(items: list[CorpusItem], limit: int = 220) -> list[str]:
         if not _is_valid_utterance(text):
             continue
         if text.startswith("回复 ") or text.startswith("[回复 "):
+            continue
+        if not _is_persona_signal_text(text):
+            continue
+        if _is_fragmentary_style_text(text):
             continue
         freq[text] += 1
         quality[text] = max(quality.get(text, 0.0), item.quality_score)
@@ -212,11 +281,29 @@ def _build_style_memory(items: list[CorpusItem], limit: int = 220) -> list[str]:
     return memory
 
 
+def _is_fragmentary_style_text(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text or "")
+    lowered = compact.lower()
+    if not compact:
+        return True
+    # keep very short reaction words in reply priors, but avoid using them as core style anchors.
+    if len(compact) <= 4 and lowered not in {"完了", "卧槽", "笑死", "不是", "没有", "难说", "稀有"}:
+        return True
+    if lowered in LOW_SIGNAL_REPLY_CANONICAL:
+        return True
+    if re.fullmatch(r"(有点|会有点|还真是|然后|所以|因为|那就|就|这个|那个)+", lowered):
+        return True
+    if len(tokenize(compact)) <= 1 and len(compact) <= 6 and compact.endswith(("了", "的", "吗", "吧", "呢")):
+        return True
+    return False
+
+
 def _build_expression_metrics(items: list[CorpusItem]) -> tuple[dict[str, float | str], list[str]]:
     if not items:
         return {}, []
 
-    texts = [i.content for i in items if i.content.strip()]
+    filtered = [i.content for i in items if i.content.strip() and _is_persona_signal_text(i.content, allow_brief=True)]
+    texts = filtered if filtered else [i.content for i in items if i.content.strip()]
     char_counts = [len(t) for t in texts]
     joined = "\n".join(texts)
     turns = max(1, len(texts))
@@ -239,12 +326,78 @@ def _build_expression_metrics(items: list[CorpusItem]) -> tuple[dict[str, float 
 
     notes: list[str] = []
     if turns < 200:
-        notes.append("Corpus size is limited; persona signal may be incomplete.")
+        notes.append("语料量偏小，人格信号可能不完整。")
     if short_ratio > 0.45:
-        notes.append("Persona frequently uses short replies; keep answers concise by default.")
+        notes.append("目标对象短句占比较高，但回复长度应随对话语义自然变化。")
     if metrics["question_ratio"] > 0.2:
-        notes.append("Frequent questioning style detected; rhetorical questions are part of voice.")
+        notes.append("检测到较高追问/反问比例，可自然保留该语气特征。")
     return metrics, notes
+
+
+def _is_persona_signal_text(text: str, *, allow_brief: bool = False) -> bool:
+    normalized = re.sub(r"\s+", "", text or "")
+    if not normalized:
+        return False
+    lowered = normalized.lower()
+    if any(h in lowered for h in NON_PERSONA_MEME_HINTS):
+        return False
+    if lowered in LOW_SIGNAL_CONTEXTS:
+        return False
+    if lowered in LOW_SIGNAL_REPLY_CANONICAL and not allow_brief:
+        return False
+    if re.fullmatch(r"(哈|哈哈|哈哈哈|啊|嗯|哦|ok|111|233|666)+", lowered):
+        return False
+    if len(normalized) <= 3 and not allow_brief:
+        return False
+    if len(tokenize(normalized)) <= 1 and len(normalized) <= 6 and not allow_brief:
+        return False
+    if normalized.count("哈") >= 3 and len(normalized) <= 8:
+        return False
+    return True
+
+
+def _is_distinctive_micro_context(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text or "")
+    lowered = compact.lower()
+    if not lowered:
+        return False
+    if lowered in LOW_SIGNAL_CONTEXTS:
+        return False
+    if lowered in {"为何", "为什么", "sry", "sorry"}:
+        return True
+    if re.fullmatch(r"(哈|哈哈|哈哈哈|啊|嗯|哦|ok|111|233|666)+", lowered):
+        return False
+    if compact.startswith(("这个", "那个")) and len(compact) <= 6:
+        return False
+    core_chars = re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", compact)
+    if len(core_chars) < 2:
+        return False
+    # short colloquial signals like "完了/稀有/塘湾了" should be retained for reply-style learning.
+    return True
+
+
+def _is_informative_context(text: str) -> bool:
+    normalized_ctx = re.sub(r"\s+", "", text or "")
+    if not normalized_ctx:
+        return False
+    lowered = normalized_ctx.lower()
+    if len(normalized_ctx) <= 5:
+        return _is_distinctive_micro_context(normalized_ctx)
+    if not _is_persona_signal_text(normalized_ctx):
+        return False
+    if lowered in LOW_SIGNAL_CONTEXTS:
+        return False
+    if lowered.startswith(("这个", "那个")) and len(lowered) <= 8:
+        return False
+    if len(tokenize(normalized_ctx)) <= 1 and len(normalized_ctx) <= 6:
+        return False
+    if len(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", normalized_ctx)) < 3:
+        return False
+    if re.fullmatch(r"[0-9a-zA-Z+]+", normalized_ctx):
+        return False
+    if normalized_ctx.count("哈") >= 2 and len(normalized_ctx) <= 8:
+        return False
+    return True
 
 
 def _build_context_reply_memory(
@@ -267,20 +420,42 @@ def _build_context_reply_memory(
         reply = item.content.strip()
         if not _is_valid_utterance(reply):
             continue
-        context = None
+        if not _is_persona_signal_text(reply, allow_brief=True) and len(reply) <= 6:
+            continue
+        if idx <= 0:
+            continue
+        # Only bind the first target turn after a non-target turn. Consecutive
+        # same-speaker streaks are usually continuation thoughts, not direct replies.
+        if timeline[idx - 1].speaker == target_speaker:
+            continue
+        context_item: CorpusItem | None = None
         for j in range(idx - 1, max(-1, idx - 8), -1):
             prev = timeline[j]
-            if prev.speaker == target_speaker:
+            if prev.source != item.source:
                 continue
-            text = prev.content.strip()
-            if _is_valid_utterance(text):
-                context = text
+            if prev.speaker == target_speaker:
                 break
-        if not context:
+            text = prev.content.strip()
+            if not _is_valid_utterance(text):
+                continue
+            if not _is_informative_context(text):
+                continue
+            context_item = prev
+            break
+        if not context_item:
             continue
+        if context_item.timestamp and item.timestamp:
+            gap = abs((item.timestamp - context_item.timestamp).total_seconds())
+            if gap > MAX_CONTEXT_GAP_SECONDS:
+                continue
+        context = context_item.content.strip()
+        context_norm = re.sub(r"\s+", "", context)
+        reply_norm = re.sub(r"\s+", "", reply)
+        micro_pair = len(context_norm) <= 8 and len(reply_norm) <= 16
         recency = (idx + 1) / max(1, len(timeline))
         richness = min((len(context) + len(reply)) / 80, 1.0)
-        score = recency * 0.35 + richness * 0.65
+        micro_bonus = 0.12 if micro_pair else 0.0
+        score = recency * 0.32 + richness * 0.56 + micro_bonus
         candidates.append((score, {"context": context, "reply": reply}))
 
     candidates.sort(key=lambda x: x[0], reverse=True)
@@ -301,7 +476,7 @@ def _fallback_claims(style_memory: list[str], section: str, provider: ModelProvi
     if not style_memory:
         return []
     excerpt = style_memory[0]
-    candidate = f"Representative utterance for {section.replace('_', ' ')}: {excerpt}"
+    candidate = f"{section} 代表性表达：{excerpt}"
     refined = provider.refine_claim(section, candidate)
     return [
         EvidenceClaim(
@@ -928,7 +1103,7 @@ def _parse_agent_json_claims(raw_text: str) -> list[dict]:
     return [c for c in claims if isinstance(c, dict)]
 
 
-def _select_agent_candidates(section: str, candidates: list[Candidate], limit: int = 96) -> list[Candidate]:
+def _select_agent_candidates(section: str, candidates: list[Candidate], limit: int = 32) -> list[Candidate]:
     if section == "mental_models":
         section_pool = {"mental_models", "decision_heuristics", "beliefs_and_values"}
     elif section == "anti_patterns_and_limits":
@@ -967,25 +1142,25 @@ def _select_agent_candidates(section: str, candidates: list[Candidate], limit: i
 
 def _friend_object_model_block() -> str:
     return (
-        "Friend persona object model:\n"
-        "- preserve reciprocal friendship stance: candid but caring, direct but not humiliating;\n"
-        "- value durable trust over short-term pleasing;\n"
-        "- include companionship behavior: practical help, emotional containment, and boundary honesty;\n"
-        "- keep banter and warmth balanced; avoid therapist-like over-smoothing.\n"
+        "朋友人格对象模型：\n"
+        "- 保持双向朋友立场：直给但不羞辱，关心但不端着；\n"
+        "- 长期信任优先于短期讨好；\n"
+        "- 兼顾陪伴行为：给实操建议、兜住情绪、边界诚实；\n"
+        "- 保留打趣和烟火气，避免“心理咨询师式”过度修饰。\n"
     )
 
 
 def _style_anchor_block(style_anchors: list[str], signature_anchors: list[str]) -> str:
     if not style_anchors and not signature_anchors:
         return ""
-    style_lines = "\n".join(f"- {line}" for line in style_anchors[:8]) or "- none"
-    lexicon_line = ", ".join(signature_anchors[:16]) if signature_anchors else "none"
+    style_lines = "\n".join(f"- {line}" for line in style_anchors[:8]) or "- 暂无"
+    lexicon_line = "、".join(signature_anchors[:16]) if signature_anchors else "暂无"
     return (
-        "Style continuity anchors from existing skill:\n"
-        "- Keep these established phrasings/rhythms unless strong contrary evidence appears.\n"
+        "已有 skill 风格连续性锚点：\n"
+        "- 除非新证据非常强，否则优先保留这些既有表达节奏。\n"
         f"{style_lines}\n"
-        f"- Signature lexicon to preserve when natural: {lexicon_line}\n"
-        "- If new corpus conflicts with anchors, downshift confidence instead of aggressive overwrite.\n"
+        f"- 可自然保留的签名词：{lexicon_line}\n"
+        "- 新语料与锚点冲突时，先降置信度，不要暴力覆盖。\n"
     )
 
 
@@ -1010,49 +1185,47 @@ def _agent_section_prompt(
     elif profile_mode == "style_anchored_update":
         mode_block = _style_anchor_block(style_anchors, signature_anchors)
     return (
-        "You are Friend-Skill persona distillation agent.\n"
+        "你是 Friend-Skill 人格蒸馏代理。\n"
         "TASK:SECTION_EXTRACTION\n"
         f"PERSONA:{persona_id}\n"
         f"PROFILE_MODE:{profile_mode}\n"
-        f"SECTION: {section}\n"
-        f"GOAL: extract {section_goal}.\n"
+        f"SECTION:{section}\n"
+        f"GOAL: 提炼 {section_goal}。\n"
         f"{mode_block}"
-        "Hard doctrine:\n"
-        "1) abstract-first, never parrot raw chat lines;\n"
-        "2) keep only transferable claims that can guide unseen but adjacent tasks;\n"
-        "3) preserve contradictions, never smooth them away;\n"
-        "4) when weakly supported, demote to lower layer instead of faking certainty;\n"
-        "5) prefer behavior rules over personality adjectives.\n"
-        "Layer constraints:\n"
-        "- beliefs_and_values: write as stable preference ordering (what is prioritized, what is refused).\n"
-        "- mental_models: write as reusable cognitive lens; must survive domain transfer.\n"
-        "- decision_heuristics: MUST be executable IF-THEN rules with trigger and action.\n"
-        "- anti_patterns_and_limits: MUST be explicit boundaries/failure modes, include what to avoid.\n"
-        "Evidence policy:\n"
-        "- each claim must reference 1-3 evidence ids;\n"
-        "- if evidence is anecdotal or one-off, lower confidence or drop;\n"
-        "- if two claims conflict, keep both and mark tension via tags.\n"
-        "Compression policy:\n"
-        "- remove meme details, names, single-event trivia, and non-transferable specifics;\n"
-        "- rewrite into compact operational language while preserving intent.\n"
-        "For SECTION=mental_models, apply triple verification before outputting a claim:\n"
-        "- cross_context: appears in >=2 contexts/evidence groups;\n"
-        "- generative: can infer stance for unseen but adjacent questions;\n"
-        "- exclusive: reflects this persona's distinctive lens, not generic life advice.\n"
-        "If a mental-model candidate fails >=2 checks, do not output it as a model claim.\n"
-        "Return STRICT JSON only with this schema:\n"
+        "硬约束：\n"
+        "1) 输出必须是中文，不要翻译成英文规则句。\n"
+        "2) 保留说话人的语气纹理（例如短句、反问、口语力度），不要抹平成咨询腔。\n"
+        "3) 结论要可迁移，但允许保留少量有辨识度的原生表达。\n"
+        "4) 有冲突就保留冲突，不要强行圆。\n"
+        "5) 证据弱时降置信度或丢弃，不要硬编。\n"
+        "6) 写行为规则，不写空泛形容词（如'很温柔''很理性'）。\n"
+        "7) 证据不足时允许输出'信息不足'类规则，不要补脑。\n"
+        "分层约束：\n"
+        "- beliefs_and_values: 提炼稳定偏好排序（重什么、拒绝什么）。\n"
+        "- mental_models: 提炼可复用认知透镜，能跨场景迁移。\n"
+        "- decision_heuristics: 产出可执行规则，可用“如果…就…”或口语动作规则句。\n"
+        "- anti_patterns_and_limits: 明确边界/雷区/失败模式。\n"
+        "证据规则：\n"
+        "- 每条 claim 绑定 1-3 个 evidence_ids。\n"
+        "- 一次性段子或单点情绪句，默认降权。\n"
+        "- 冲突条目保留并用 tags 标注 tension。\n"
+        "压缩规则：\n"
+        "- 删除纯梗、无关人名、不可迁移细节。\n"
+        "- 但不要过度去口语化，保留人格辨识度。\n"
+        "- 禁止无证据补全具体名词（菜名、地点、人物背景）。\n"
+        "当 SECTION=mental_models 时执行三重门禁：\n"
+        "- cross_context: 至少跨 2 个上下文/证据组出现；\n"
+        "- generative: 可推断相邻新问题的立场；\n"
+        "- exclusive: 能体现该人格独特视角，不是通用鸡汤。\n"
+        "若 mental-model 候选失败 >=2 项，不要放进 mental_models。\n"
+        "仅返回 JSON（不要 markdown），schema：\n"
         '{"claims":[{"claim":"...", "evidence_ids":["ev_001"], "confidence":0.0, "tags":["agent","cross_context","generative","exclusive","tension"]}]}\n'
-        "Rules:\n"
-        "- Do not output markdown.\n"
-        "- Claim must be compact, reusable, and de-lexicalized.\n"
-        "- Prefer abstraction over literal quote copying.\n"
-        "- Each claim must reference 1-3 evidence_ids from the evidence list.\n"
-        "- Output at most 8 claims.\n"
-        "- Confidence range must be [0.35, 0.95].\n"
-        "- Avoid generic motivational wording.\n"
-        "- Do not use proper names unless they are structurally required.\n"
-        "- Avoid profanity unless it is essential to boundary semantics.\n"
-        "- For anti_patterns_and_limits, include boundaries and what should be avoided.\n"
+        "补充规则：\n"
+        "- 每条 claim 最长 120 字。\n"
+        "- 最多输出 8 条。\n"
+        "- confidence 范围 [0.35, 0.95]。\n"
+        "- 禁止空泛励志句。\n"
+        "- anti_patterns_and_limits 必须写出“不要做什么”。\n"
         "Evidence:\n"
         f"{evidence_lines}\n"
     )
@@ -1067,25 +1240,27 @@ def _agent_refine_prompt(
     evidence_lines = "\n".join(f"[{ev_id}] {candidate.claim}" for ev_id, candidate in selected)
     draft_json = json.dumps({"claims": draft_claims[:8]}, ensure_ascii=False)
     return (
-        "You are Distillation-Reviewer agent.\n"
+        "你是 Distillation-Reviewer 代理。\n"
         "TASK:SECTION_REFINEMENT\n"
         f"PERSONA:{persona_id}\n"
         f"SECTION:{section}\n"
-        "Goal: improve draft claims for fidelity, transferability, and constraint compliance.\n"
-        "Refinement checklist:\n"
-        "1) remove literal chat echoes and non-transferable trivia;\n"
-        "2) enforce abstraction and executable rule form (especially decision heuristics);\n"
-        "3) preserve valid tensions/contradictions;\n"
-        "4) remove duplicates and near-duplicates;\n"
-        "5) tighten confidence calibration by evidence strength.\n"
-        "Do NOT add unsupported claims.\n"
-        "Return STRICT JSON only:\n"
+        "目标：提升草稿的风格保真度、迁移性和约束合规性。\n"
+        "检查清单：\n"
+        "1) 去掉无迁移价值的噪声细节；\n"
+        "2) 保留人格语气纹理，不要修成公文腔；\n"
+        "3) 决策规则要可执行，但不强制写成英文 IF-THEN；\n"
+        "4) 保留有效冲突，删除重复或近重复；\n"
+        "5) 根据证据强弱校准 confidence。\n"
+        "禁止新增无证据支持的 claim。\n"
+        "仅返回 JSON：\n"
         '{"claims":[{"claim":"...", "evidence_ids":["ev_001"], "confidence":0.0, "tags":["agent","cross_context","generative","exclusive","tension"]}]}\n'
-        "Rules:\n"
-        "- max 8 claims.\n"
-        "- confidence must be in [0.35, 0.95].\n"
-        "- each claim uses 1-3 evidence ids.\n"
-        "- keep concise and de-lexicalized wording.\n"
+        "规则：\n"
+        "- 输出中文。\n"
+        "- 最多 8 条。\n"
+        "- confidence 范围 [0.35, 0.95]。\n"
+        "- 每条 claim 使用 1-3 个 evidence_ids。\n"
+        "- 每条 claim 最长 120 字。\n"
+        "- 不要凭空新增语料中未出现的具体对象名。\n"
         "Evidence:\n"
         f"{evidence_lines}\n"
         "Draft:\n"
@@ -1217,11 +1392,18 @@ def _finalize_profile(
     distillation_mode: str,
 ) -> PersonaProfile:
     metrics, uncertainty = _build_expression_metrics(working_items)
+    avg_chars = metrics.get("avg_chars_per_turn", 0)
+    short_ratio = metrics.get("short_reply_ratio", 0)
+    directness = metrics.get("directness_score", 0)
+    question_ratio = metrics.get("question_ratio", 0)
+    signature_preview = "、".join(signature_lexicon[:10]) or "暂无"
+    style_preview = " / ".join(safe_excerpt(x, 18) for x in style_memory[:3]) or "暂无"
     expr_claims = [
-        f"Average reply length is {metrics.get('avg_chars_per_turn', 0)} Chinese characters.",
-        f"Short-reply ratio is {metrics.get('short_reply_ratio', 0)}, often concise and punchy.",
-        f"Directness score is {metrics.get('directness_score', 0)}, with low hedging tendency.",
-        f"Signature lexicon includes: {', '.join(signature_lexicon[:12])}.",
+        f"常用短句推进对话，平均每轮约 {avg_chars} 字，短句比例 {short_ratio}。",
+        f"表达直给，直接性得分约 {directness}，遇到犹豫场景倾向先给立场。",
+        f"反问/追问频率约 {question_ratio}，必要时会用追问逼近重点。",
+        f"高频口语签名：{signature_preview}。",
+        f"代表性句感：{style_preview}。",
     ]
     grouped["expression_dna"] = [
         EvidenceClaim(

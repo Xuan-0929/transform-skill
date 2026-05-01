@@ -79,17 +79,37 @@ def _tagline(profile: PersonaProfile) -> str:
     beliefs = profile.sections.get("beliefs_and_values", [])
     if beliefs:
         return safe_excerpt(beliefs[0].claim, max_len=80)
-    return "先判断，再表达；先边界，再结论。"
+    return "先把话说明白，再给判断，别端着。"
 
 
 def _roleplay_block() -> str:
     return (
         "## 角色扮演规则（最重要）\n\n"
         "- Skill激活后直接以第一人称回应，不使用“ta会怎么想”的转述语气。\n"
-        "- 优先复现决策方式，不追求机械复读口头禅。\n"
+        "- 优先复现语气和判断习惯，不要把口吻抹平成“职业咨询师”。\n"
+        "- 允许自然使用语料中的口头表达，但不要机械复读同一句。\n"
         "- 首次触发可做一次简短免责声明，后续不重复。\n"
         "- 用户要求“退出角色/切回正常模式”时立即退出。\n"
         "- 遇到证据不足，不要硬演，必须明确不确定性和缺失信息。\n\n"
+    )
+
+
+def _layer0_hard_rules_block(profile: PersonaProfile) -> str:
+    directness = float(profile.expression_metrics.get("directness_score", 0) or 0)
+    short_ratio = float(profile.expression_metrics.get("short_reply_ratio", 0) or 0)
+    style_hint = "高直给" if directness >= 0.75 else "相对克制"
+    brevity_hint = "短句优先" if short_ratio >= 0.2 else "中短句"
+    return (
+        "## Layer 0：硬规则（最高优先级）\n\n"
+        "1. 你就是这个人，不是客服，不是咨询师，不是教程生成器。\n"
+        "2. 不说语料里明显不可能说的话，不临时换人格。\n"
+        "3. 不把人设自动美化成“完美温柔高情商”，保留原有棱角。\n"
+        "4. 用户没要求结构化时，不主动输出清单/分点/模板壳。\n"
+        "5. 信息不足时不硬编细节，最多给最小动作并说明缺什么信息。\n"
+        "6. 允许回避、敷衍、反问或转话题（如果这就是该人格的真实习惯）。\n"
+        "7. 同一问题优先复用相近语料句感，不重新发明“标准答案”。\n"
+        f"8. 当前人格基线：{style_hint} + {brevity_hint}，回答应贴合该基线。\n"
+        "9. 执行优先级：Layer 0 > 对话形态约束 > 原声锚点与场景示例 > 其他规则。\n\n"
     )
 
 
@@ -105,12 +125,60 @@ def _trigger_block(persona_name: str) -> str:
 def _protocol_block() -> str:
     return (
         "## 回答工作流（Agentic Protocol）\n\n"
-        "1. **问题分流**：先判断是决策题、改写题、还是事实题。\n"
-        "2. **证据选取**：从心智模型/启发式/边界层各选至少1条相关证据。\n"
-        "3. **生成回答**：先给结论，再给理由，再给可执行动作。\n"
+        "1. **问题分流**：判断是日常闲聊、决策题、改写题还是事实题。\n"
+        "2. **风格锁定**：先对齐语气节奏（像朋友聊天），再组织观点。\n"
+        "3. **回答生成**：默认给自然短句回答；仅在用户要求时再展开成步骤/条目。\n"
         "4. **边界检查**：核对反模式、冲突项和不确定性声明是否齐全。\n"
-        "5. **输出定稿**：满足输出契约和质量清单后再返回。\n\n"
+        "5. **输出定稿**：保证像这个人说话，而不是像模板在说话。\n\n"
     )
+
+
+def _conversation_contract_block(profile: PersonaProfile) -> str:
+    short_ratio = float(profile.expression_metrics.get("short_reply_ratio", 0) or 0)
+    concise_hint = "默认 1-2 句。" if short_ratio >= 0.2 else "默认 2-4 句。"
+    return (
+        "## 对话输出形态（风格优先）\n\n"
+        "- 日常问题先像朋友一样直接回，不先写“结论：”。\n"
+        f"- {concise_hint} 只有用户要求“详细展开/分步骤”时再拉长。\n"
+        "- 默认不用标题、编号、小作文结构；除非用户明确要清单。\n"
+        "- 允许轻微吐槽、反问、停顿词，保持真实聊天感。\n"
+        "- 决策建议可以给立场，但不要固定成“结论-理由-执行”三段式。\n"
+        "- 不要主动给花哨备选套餐（如三选一菜单），除非用户明确要选项。\n\n"
+    )
+
+
+def _style_anchor_reply_block(profile: PersonaProfile) -> str:
+    memory = [safe_excerpt(x, 80) for x in profile.style_memory[:8] if x.strip()]
+    if not memory:
+        memory = ["暂无高置信度原话样本。"]
+    lines = "\n".join(f"- {x}" for x in memory)
+    return (
+        "## 原声回复锚点（强约束）\n\n"
+        "- 先贴近这些原话的节奏和力度，再组织内容。\n"
+        "- 同义改写可以做，但不要把语气洗成“客服/咨询顾问”。\n"
+        "- 用户问题信息不足时，不要自造细节名词（菜名、地点、人物设定）。\n"
+        "- 若要给建议，先给最小动作，不主动铺陈长解释。\n"
+        "- 高相似问句优先复用相近句感，而不是重新发明话术。\n"
+        f"{lines}\n\n"
+    )
+
+
+def _scene_example_block(profile: PersonaProfile) -> str:
+    pairs = profile.context_reply_memory[:5]
+    if not pairs:
+        return (
+            "## 场景化原声示例\n\n"
+            "- 暂无高置信度问答对，优先参考上方原声锚点。\n\n"
+        )
+    lines = ["## 场景化原声示例", ""]
+    for idx, pair in enumerate(pairs, start=1):
+        ctx = safe_excerpt(pair.get("context", "").strip(), 90) or "（语境缺失）"
+        rep = safe_excerpt(pair.get("reply", "").strip(), 110) or "（回复缺失）"
+        lines.append(f"### 场景 {idx}")
+        lines.append(f"- 别人说：{ctx}")
+        lines.append(f"- 你会回：{rep}")
+        lines.append("")
+    return "\n".join(lines) + "\n"
 
 
 def _identity_block(profile: PersonaProfile, persona_name: str) -> str:
@@ -213,6 +281,7 @@ def _expression_block(profile: PersonaProfile) -> str:
         f"exclaim_ratio={metrics.get('exclaim_ratio', 0)}。\n"
         f"- **词汇签名**：{lexicon}\n"
         "- **语气策略**：在高不确定场景保持直接，但必须给边界说明。\n"
+        "- **禁用腔调**：避免“结论：/理由很简单：/现在就执行：”这类报告口吻。\n"
         "- **代表性表达片段**：\n"
         f"{memory}\n\n"
     )
@@ -248,22 +317,26 @@ def _values_and_anti_block(profile: PersonaProfile) -> str:
 def _output_contract_block() -> str:
     return (
         "## 输出契约\n\n"
-        "- MUST 给出明确结论或下一步动作（若问题是决策导向）。\n"
-        "- MUST 给出理由链，而不是只有态度。\n"
+        "- MUST 优先保持该人格的聊天语气，不要先变成咨询报告。\n"
+        "- MUST 在决策题中给出明确立场，但长度按用户问题复杂度走。\n"
+        "- CAN 给理由链；当用户没要求细节时不必长篇展开。\n"
         "- MUST 在证据不足时显式声明不确定性。\n"
         "- MUST NOT 编造语料外的人设事实、经历或关系。\n"
-        "- MUST NOT 用口头禅替代推理。\n\n"
+        "- MUST NOT 默认套用固定模板（如“结论/理由/执行”三段式）。\n"
+        "- MUST NOT 无依据扩写具体名词清单（菜名、店名、行程等）。\n"
+        "- MUST NOT 在普通问答里输出“规则1/规则2/触发条件/动作策略”这类元标签。\n"
+        "- MUST NOT 用口头禅替代思考，但可以自然保留语气词。\n\n"
     )
 
 
 def _quality_checklist_block() -> str:
     return (
         "## 质量检查清单\n\n"
-        "- [ ] 至少引用了1条心智模型或决策启发式。\n"
-        "- [ ] 结论与证据一致，没有跳步推理。\n"
+        "- [ ] 第一眼读起来像朋友对话，不像公文模板。\n"
+        "- [ ] 有立场，但没有机械三段式套壳。\n"
         "- [ ] 已检查反模式边界，没有越界输出。\n"
         "- [ ] 不确定性声明已给出（若需要）。\n"
-        "- [ ] 语气相似但不过拟合口头禅。\n\n"
+        "- [ ] 保留了语气纹理，不是空洞鸡汤。\n\n"
     )
 
 
@@ -333,8 +406,12 @@ def _build_skill_markdown(
     )
     body = (
         _roleplay_block()
+        + _layer0_hard_rules_block(profile)
         + _trigger_block(persona_name)
         + _protocol_block()
+        + _conversation_contract_block(profile)
+        + _style_anchor_reply_block(profile)
+        + _scene_example_block(profile)
         + _identity_block(profile, persona_name)
         + _core_models_block(profile)
         + _heuristics_block(profile)
@@ -347,6 +424,35 @@ def _build_skill_markdown(
         + _appendix_block(profile)
     )
     return frontmatter + title + body
+
+
+def _usage_examples_text(profile: PersonaProfile) -> str:
+    lines = [
+        "# Usage Examples",
+        "",
+        "## Output Style Guard",
+        "",
+        "- 默认使用自然聊天口吻，不用报告腔。",
+        "- 用户没要求细节时，保持短回复。",
+        "- 避免固定壳：`结论：... 理由：... 现在执行：...`。",
+        "- 不足信息下不自造细节（如菜名/地点/人物背景）。",
+        "",
+    ]
+    pairs = profile.context_reply_memory[:3]
+    if pairs:
+        for idx, pair in enumerate(pairs, start=1):
+            context = safe_excerpt(pair.get("context", "").strip(), 120) or "（语境缺失）"
+            reply = safe_excerpt(pair.get("reply", "").strip(), 120) or "（回复缺失）"
+            lines.append(f"## Example {idx}: Corpus Pair")
+            lines.append(f"User: {context}")
+            lines.append(f"Assistant style target: {reply}")
+            lines.append("")
+    else:
+        for idx, text in enumerate(profile.style_memory[:3], start=1):
+            lines.append(f"## Example {idx}: Style Snippet")
+            lines.append(f"Assistant style target: {safe_excerpt(text, 120)}")
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _render_references(profile: PersonaProfile) -> tuple[str, str, str, str, str, str, str, str]:
@@ -425,20 +531,7 @@ def _render_references(profile: PersonaProfile) -> tuple[str, str, str, str, str
         blueprint_lines.append(f"- {claim.claim}")
     blueprint_lines.append("")
 
-    examples_text = """# Usage Examples
-
-## Example 1: Decision
-User: 现在该不该立刻推进？
-Assistant behavior: 先给结论，再按风险/收益解释，并给下一步动作。
-
-## Example 2: Rewrite
-User: 帮我把这段话改成ta的口吻。
-Assistant behavior: 保持其节奏与判断方式，但不编造语料外事实。
-
-## Example 3: Uncertainty
-User: 给一个很具体的行业判断。
-Assistant behavior: 若语料中无足够依据，明确不确定，并给出需要补充的证据类型。
-"""
+    examples_text = _usage_examples_text(profile)
     for idx, text in enumerate(profile.style_memory[:150], start=1):
         style_memory_lines.append(f"{idx}. {text}")
 

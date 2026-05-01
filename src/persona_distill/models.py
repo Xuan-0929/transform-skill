@@ -135,6 +135,7 @@ class PersonaState(BaseModel):
     current_version: str | None = None
     stable_version: str | None = None
     latest_version: str | None = None
+    target_speaker: str | None = None
 
 
 class CorrectionNote(BaseModel):

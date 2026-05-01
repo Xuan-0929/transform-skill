@@ -1,13 +1,116 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from pathlib import Path
+import re
 
 from .evaluation import _persona_context
-from .ingest import parse_input
+from .ingest import parse_input, parse_timestamp
 from .models import PersonaProfile
 from .providers import ModelProvider
 from .utils import jaccard_similarity, stable_hash
+
+MAX_CONTEXT_GAP_SECONDS = 3 * 60 * 60
+
+
+def _record_source(record: dict) -> str:
+    return str(record.get("_source_path") or record.get("source") or "")
+
+
+def _same_source(records: list[dict], left: int, right: int) -> bool:
+    if left < 0 or right < 0 or left >= len(records) or right >= len(records):
+        return False
+    left_source = _record_source(records[left])
+    right_source = _record_source(records[right])
+    return left_source == right_source
+
+
+def _speaker_name_matches(text: str, speaker: str) -> bool:
+    cleaned = (text or "").strip()
+    target = (speaker or "").strip()
+    if not cleaned or not target:
+        return False
+    return f"@{target}" in cleaned or target in cleaned
+
+
+def _char_set(text: str) -> set[str]:
+    return set(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", text or ""))
+
+
+def _char_overlap(a: str, b: str) -> float:
+    left = _char_set(a)
+    right = _char_set(b)
+    if not left or not right:
+        return 0.0
+    return len(left & right) / max(1, len(left | right))
+
+
+def _context_reply_relevance(context: str, reply: str, *, target_speaker: str, distance: int) -> float:
+    ctx = (context or "").strip()
+    rep = (reply or "").strip()
+    if not ctx or not rep:
+        return 0.0
+    score = 0.45 * jaccard_similarity(ctx, rep) + 0.35 * _char_overlap(ctx, rep)
+    if ctx == rep:
+        score += 0.45
+    if ctx in rep or rep in ctx:
+        score += 0.2
+    if _speaker_name_matches(ctx, target_speaker):
+        score += 0.14
+    if any(h in ctx for h in ("谁", "哪个", "哪位", "什么人")) and len(rep) <= 16:
+        score += 0.24
+    if any(h in ctx for h in ("为什么", "为何", "怎么", "咋")) and any(
+        h in rep for h in ("因为", "可能", "应该", "紧张", "不知道", "难说", "是")
+    ):
+        score += 0.16
+    if ctx.endswith(("吗", "嘛", "么", "？", "?")) and len(rep) <= 24:
+        score += 0.12
+    score += max(0.0, 0.06 - distance * 0.01)
+    return score
+
+
+def _choose_context_candidate(
+    candidates: list[tuple[int, dict]],
+    reply: str,
+    *,
+    target_speaker: str,
+) -> tuple[int, dict] | None:
+    if not candidates:
+        return None
+    non_target_speakers = {
+        str(record.get("speaker") or "unknown").strip()
+        for _, record in candidates
+        if str(record.get("speaker") or "unknown").strip() != target_speaker
+    }
+    scored: list[tuple[float, int, dict]] = []
+    for distance, (idx, record) in enumerate(candidates):
+        text = str(record.get("content") or "").strip()
+        score = _context_reply_relevance(
+            text,
+            reply,
+            target_speaker=target_speaker,
+            distance=distance,
+        )
+        scored.append((score, idx, record))
+    scored.sort(key=lambda row: (row[0], -row[1]), reverse=True)
+    best_score, best_idx, best_record = scored[0]
+    closest_idx, closest_record = candidates[0]
+    closest_score = _context_reply_relevance(
+        str(closest_record.get("content") or ""),
+        reply,
+        target_speaker=target_speaker,
+        distance=0,
+    )
+    if len(non_target_speakers) <= 1:
+        # In private or single-counterpart blocks, keep the natural adjacent turn unless
+        # an older line is clearly a better thread anchor.
+        if best_idx != closest_idx and best_score >= closest_score + 0.12:
+            return best_idx, best_record
+        return closest_idx, closest_record
+    if best_score < 0.13:
+        return None
+    return best_idx, best_record
 
 
 def _valid_text(text: str) -> bool:
@@ -30,7 +133,7 @@ def _valid_text(text: str) -> bool:
 
 
 def _style_markers(text: str) -> set[str]:
-    marker_pool = ["？", "?", "！", "!", "哈哈", "笑死", "卧槽", "吗", "吧", "了", "呢", "捏"]
+    marker_pool = ["？", "?", "！", "!", "哈哈", "笑死", "卧槽", "完了", "离谱", "逆天", "捏", "呜呜"]
     return {m for m in marker_pool if m in text}
 
 
@@ -50,6 +153,140 @@ def _style_compat_score(response: str, reference: str) -> float:
     return round(0.5 * len_score + 0.35 * marker_score + 0.15 * brevity_score, 3)
 
 
+def _norm_text(text: str) -> str:
+    return re.sub(r"\s+", "", text or "").strip().lower()
+
+
+def _intent_bucket(text: str) -> str:
+    cleaned = _norm_text(text)
+    if not cleaned:
+        return "other"
+    if any(h in cleaned for h in ("没事", "别慌", "慢慢来", "稳", "可以的", "正常", "先稳住", "放心")):
+        return "comfort"
+    if any(h in cleaned for h in ("不好说", "难说", "不知道", "看情况", "不确定", "大概")):
+        return "uncertain"
+    if any(h in cleaned for h in ("不是", "没有", "没呢", "不行", "不对", "算了", "不太", "没来", "别")):
+        return "negative"
+    if cleaned.endswith("没") or cleaned.endswith("没有"):
+        return "negative"
+    if any(h in cleaned for h in ("是的", "对的", "可以", "好的", "好滴", "行", "行吧", "ok", "对", "嗯", "确实", "还真是", "是啊", "对啊")):
+        return "affirmative"
+    if any(h in cleaned for h in ("笑", "哈哈", "笑死", "搞笑", "绷")):
+        return "reaction_laugh"
+    if any(h in cleaned for h in ("完了", "卧槽", "我去", "可恶", "离谱", "逆天", "炸", "瓦", "崩")):
+        return "reaction_panic"
+    return "other"
+
+
+def _intent_compat_score(response: str, references: list[str]) -> float:
+    if not response or not references:
+        return 0.0
+    rb = _intent_bucket(response)
+    ref_buckets_all = {_intent_bucket(ref) for ref in references if ref.strip()}
+    if not ref_buckets_all:
+        return 0.0
+    ref_buckets = {b for b in ref_buckets_all if b != "other"}
+    if not ref_buckets:
+        # No clear intent signal in references: keep this metric neutral instead of rewarding generic replies.
+        return 0.5
+    if rb == "other":
+        return 0.2
+    if rb in ref_buckets:
+        return 1.0
+    if rb.startswith("reaction_") and any(b.startswith("reaction_") for b in ref_buckets):
+        return 0.7
+    return 0.0
+
+
+def _persona_alignment_brief(profile: PersonaProfile) -> str:
+    lines: list[str] = []
+    labels = {
+        "beliefs_and_values": "价值观",
+        "mental_models": "认知方式",
+        "decision_heuristics": "决策习惯",
+        "anti_patterns_and_limits": "边界",
+        "expression_dna": "表达方式",
+    }
+    for section in (
+        "beliefs_and_values",
+        "mental_models",
+        "decision_heuristics",
+        "anti_patterns_and_limits",
+        "expression_dna",
+    ):
+        for claim in profile.sections.get(section, [])[:2]:
+            text = str(getattr(claim, "claim", "") or "").strip()
+            if text:
+                lines.append(f"- {labels.get(section, section)}: {text}")
+    if profile.signature_lexicon:
+        lines.append("- 口吻词库（只能少量使用）: " + " / ".join(profile.signature_lexicon[:12]))
+    return "\n".join(lines[:12])
+
+
+def _parse_alignment_score(raw: str) -> tuple[float, str]:
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return 0.0, "judge returned invalid JSON"
+    if not isinstance(payload, dict):
+        return 0.0, "judge returned non-object JSON"
+    try:
+        score = float(payload.get("score", 0.0))
+    except Exception:
+        score = 0.0
+    rationale = str(payload.get("rationale") or "")[:180]
+    return max(0.0, min(1.0, score)), rationale
+
+
+def _judge_persona_alignment(
+    provider: ModelProvider,
+    profile: PersonaProfile,
+    *,
+    target_speaker: str,
+    prompt: str,
+    recent_window: list[str],
+    response: str,
+) -> tuple[float, str]:
+    recent_block = "\n".join(f"- {line}" for line in recent_window[-20:])
+    judge_prompt = (
+        "You are evaluating persona distillation quality, not exact wording overlap.\n"
+        "Return JSON only: {\"score\": 0.0-1.0, \"rationale\": \"short Chinese reason\"}.\n"
+        "Score the GENERATED_REPLY on these dimensions:\n"
+        "1) value/stance alignment with PERSONA_BRIEF;\n"
+        "2) dialogue act fit for the live RECENT_CONTEXT;\n"
+        "3) natural expression style without overusing catchphrases;\n"
+        "4) target speaker continuity in a group chat;\n"
+        "5) no generic assistant/report tone.\n"
+        "Do not reward copying. Reward persona mechanism and conversational plausibility.\n\n"
+        f"[TARGET_SPEAKER]\n{target_speaker}\n\n"
+        f"[PERSONA_BRIEF]\n{_persona_alignment_brief(profile)}\n\n"
+        f"[RECENT_CONTEXT]\n{recent_block}\n\n"
+        f"[LATEST_PROMPT]\n{prompt}\n\n"
+        f"[GENERATED_REPLY]\n{response}\n"
+    )
+    try:
+        raw = provider.run_agent(judge_prompt)
+    except Exception as exc:
+        return 0.0, f"judge failed: {exc}"
+    return _parse_alignment_score(raw)
+
+
+def _target_stance_hints(recent_window: list[str], target_speaker: str, limit: int = 3) -> list[str]:
+    hints: list[str] = []
+    stance_markers = ("不是", "是", "问题是", "我觉得", "我感觉", "没逼", "正常", "不行", "可以")
+    prefix = f"{target_speaker}:"
+    for line in recent_window:
+        cleaned = line.strip()
+        if not cleaned.startswith(prefix):
+            continue
+        text = cleaned.split(":", 1)[1].strip()
+        if not text:
+            continue
+        if any(marker in text for marker in stance_markers):
+            hints.append(text)
+    return hints[-limit:]
+
+
 def _build_context_reply_groups(
     holdout_path: Path,
     target_speaker: str,
@@ -66,22 +303,121 @@ def _build_context_reply_groups(
             continue
         if len(reply) > 24:
             continue
+        if idx <= 0:
+            continue
+        if not _same_source(records, idx, idx - 1):
+            continue
+        prev_speaker = str(records[idx - 1].get("speaker") or "unknown").strip()
+        if prev_speaker == target_speaker:
+            continue
         context = ""
+        context_record: dict | None = None
+        context_idx = -1
+        candidates: list[tuple[int, dict]] = []
         for j in range(idx - 1, max(-1, idx - lookback), -1):
+            if not _same_source(records, idx, j):
+                break
             prev = records[j]
             prev_speaker = str(prev.get("speaker") or "unknown").strip()
             prev_text = str(prev.get("content") or "").strip()
             if prev_speaker == target_speaker:
-                continue
-            if _valid_text(prev_text):
-                context = prev_text
                 break
+            if _valid_text(prev_text):
+                candidates.append((j, prev))
+        chosen = _choose_context_candidate(candidates, reply, target_speaker=target_speaker)
+        if chosen is not None:
+            context_idx, context_record = chosen
+            context = str(context_record.get("content") or "").strip()
         if not context:
             continue
+        if context_record is not None:
+            reply_ts = parse_timestamp(record.get("timestamp"))
+            context_ts = parse_timestamp(context_record.get("timestamp"))
+            if reply_ts and context_ts:
+                gap = abs((reply_ts - context_ts).total_seconds())
+                if gap > MAX_CONTEXT_GAP_SECONDS:
+                    continue
         if len(context) > 26:
             continue
         groups[context].append(reply)
     return groups
+
+
+def _build_recent_context_windows(
+    holdout_path: Path,
+    target_speaker: str,
+    lookback: int = 8,
+    history_turns: int = 4,
+) -> dict[str, list[str]]:
+    records = parse_input(holdout_path, "auto")
+    windows: dict[str, list[str]] = {}
+    for idx, record in enumerate(records):
+        speaker = str(record.get("speaker") or "unknown").strip()
+        if speaker != target_speaker:
+            continue
+        reply = str(record.get("content") or "").strip()
+        if not _valid_text(reply):
+            continue
+        if len(reply) > 24:
+            continue
+        if idx <= 0:
+            continue
+        if not _same_source(records, idx, idx - 1):
+            continue
+        prev_speaker = str(records[idx - 1].get("speaker") or "unknown").strip()
+        if prev_speaker == target_speaker:
+            continue
+
+        context = ""
+        context_record: dict | None = None
+        context_idx = -1
+        candidates: list[tuple[int, dict]] = []
+        for j in range(idx - 1, max(-1, idx - lookback), -1):
+            if not _same_source(records, idx, j):
+                break
+            prev = records[j]
+            prev_speaker = str(prev.get("speaker") or "unknown").strip()
+            prev_text = str(prev.get("content") or "").strip()
+            if prev_speaker == target_speaker:
+                break
+            if _valid_text(prev_text):
+                candidates.append((j, prev))
+        chosen = _choose_context_candidate(candidates, reply, target_speaker=target_speaker)
+        if chosen is not None:
+            context_idx, context_record = chosen
+            context = str(context_record.get("content") or "").strip()
+        if not context or context_idx < 0:
+            continue
+        if context_record is not None:
+            reply_ts = parse_timestamp(record.get("timestamp"))
+            context_ts = parse_timestamp(context_record.get("timestamp"))
+            if reply_ts and context_ts:
+                gap = abs((reply_ts - context_ts).total_seconds())
+                if gap > MAX_CONTEXT_GAP_SECONDS:
+                    continue
+        if len(context) > 26:
+            continue
+
+        start = max(0, context_idx - max(1, history_turns) + 1)
+        rendered: list[str] = []
+        for k in range(start, context_idx + 1):
+            if not _same_source(records, context_idx, k):
+                continue
+            row = records[k]
+            row_speaker = str(row.get("speaker") or "unknown").strip() or "unknown"
+            row_text = str(row.get("content") or "").strip()
+            if not _valid_text(row_text):
+                continue
+            if len(row_text) > 80:
+                row_text = row_text[:80] + "..."
+            rendered.append(f"{row_speaker}: {row_text}")
+        if not rendered:
+            rendered = [f"other: {context}"]
+
+        previous = windows.get(context, [])
+        if len(rendered) >= len(previous):
+            windows[context] = rendered
+    return windows
 
 
 def evaluate_multi_ref_holdout(
@@ -94,8 +430,17 @@ def evaluate_multi_ref_holdout(
     min_refs: int = 2,
     min_avg_similarity: float = 0.2,
     min_delta_vs_baseline: float = 0.12,
+    context_turns: int = 20,
+    judge_persona_alignment: bool = False,
+    min_persona_alignment: float = 0.0,
 ) -> dict:
     groups = _build_context_reply_groups(holdout_path, target_speaker=target_speaker)
+    context_windows = _build_recent_context_windows(
+        holdout_path,
+        target_speaker=target_speaker,
+        lookback=8,
+        history_turns=context_turns,
+    )
     group_items: list[tuple[float, str, list[str]]] = []
     for context, replies in groups.items():
         deduped = []
@@ -126,35 +471,83 @@ def evaluate_multi_ref_holdout(
     agent_scores: list[float] = []
     strict_scores: list[float] = []
     baseline_scores: list[float] = []
+    agent_intent_scores: list[float] = []
+    baseline_intent_scores: list[float] = []
+    persona_alignment_scores: list[float] = []
     for _, context, replies in selected:
         holdout_reply = replies[0]
         acceptable_refs = replies[1:] if len(replies) > 1 else replies[:]
         if not acceptable_refs:
             continue
         persona_context = _persona_context(profile, context)
+        recent_window = context_windows.get(context, [])
+        if recent_window:
+            window_block = "\n".join(f"- {line}" for line in recent_window[-max(1, context_turns):])
+            persona_context = (
+                f"{persona_context}\n"
+                "[EVAL_TARGET_SPEAKER]\n"
+                f"{target_speaker}\n"
+                "[EVAL_RECENT_CONTEXT]\n"
+                "- 仅作本轮语境参考，不覆盖 PERSONA_CORE。\n"
+                f"{window_block}"
+            )
+            stance_hints = _target_stance_hints(recent_window, target_speaker=target_speaker)
+            if stance_hints:
+                persona_context = (
+                    f"{persona_context}\n"
+                    "[EVAL_TARGET_STANCE]\n"
+                    + "\n".join(f"- {hint}" for hint in stance_hints)
+                )
+        if judge_persona_alignment:
+            persona_context = (
+                f"{persona_context}\n"
+                "[PERSONA_ALIGNMENT_MODE]\n"
+                "- 优先评估人格机制、价值立场和上下文连续性；不要为了贴原句而只输出低信息短答。"
+            )
         response = provider.generate_response(context, persona_context).strip()
-        multi_ref_sim = max(
-            0.7 * jaccard_similarity(response, ref) + 0.3 * _style_compat_score(response, ref)
+        persona_alignment = None
+        persona_alignment_rationale = ""
+        if judge_persona_alignment:
+            persona_alignment, persona_alignment_rationale = _judge_persona_alignment(
+                provider,
+                profile,
+                target_speaker=target_speaker,
+                prompt=context,
+                recent_window=recent_window,
+                response=response,
+            )
+            persona_alignment_scores.append(persona_alignment)
+        semantic_style_sim = max(
+            0.8 * jaccard_similarity(response, ref) + 0.2 * _style_compat_score(response, ref)
             for ref in acceptable_refs
         )
+        intent_score = _intent_compat_score(response, acceptable_refs)
+        multi_ref_sim = 0.78 * semantic_style_sim + 0.22 * intent_score
         strict_sim = jaccard_similarity(response, holdout_reply)
-        base_sim = max(
-            0.7 * jaccard_similarity(baseline_response, ref) + 0.3 * _style_compat_score(baseline_response, ref)
+        base_semantic_style = max(
+            0.8 * jaccard_similarity(baseline_response, ref) + 0.2 * _style_compat_score(baseline_response, ref)
             for ref in acceptable_refs
         )
+        base_intent = _intent_compat_score(baseline_response, acceptable_refs)
+        base_sim = 0.78 * base_semantic_style + 0.22 * base_intent
         agent_scores.append(multi_ref_sim)
         strict_scores.append(strict_sim)
         baseline_scores.append(base_sim)
-        examples.append(
-            {
-                "prompt": context,
-                "holdout_reply": holdout_reply,
-                "acceptable_refs": acceptable_refs[:6],
-                "resp": response,
-                "multi_ref_sim": round(multi_ref_sim, 3),
-                "strict_sim": round(strict_sim, 3),
-            }
-        )
+        agent_intent_scores.append(intent_score)
+        baseline_intent_scores.append(base_intent)
+        example = {
+            "prompt": context,
+            "holdout_reply": holdout_reply,
+            "acceptable_refs": acceptable_refs[:6],
+            "resp": response,
+            "multi_ref_sim": round(multi_ref_sim, 3),
+            "strict_sim": round(strict_sim, 3),
+            "intent_match": round(intent_score, 3),
+        }
+        if judge_persona_alignment:
+            example["persona_alignment"] = round(float(persona_alignment or 0.0), 3)
+            example["persona_alignment_rationale"] = persona_alignment_rationale
+        examples.append(example)
 
     def _avg(values: list[float]) -> float:
         if not values:
@@ -164,25 +557,40 @@ def evaluate_multi_ref_holdout(
     agent_avg = _avg(agent_scores)
     baseline_avg = _avg(baseline_scores)
     strict_avg = _avg(strict_scores)
+    intent_avg = _avg(agent_intent_scores)
+    baseline_intent_avg = _avg(baseline_intent_scores)
+    persona_alignment_avg = _avg(persona_alignment_scores) if judge_persona_alignment else None
     delta = round(agent_avg - baseline_avg, 3)
+    intent_delta = round(intent_avg - baseline_intent_avg, 3)
     pass_rule = (
         f"agent_avg_similarity>={min_avg_similarity:.2f} and "
         f"delta_vs_baseline>={min_delta_vs_baseline:.2f}"
     )
+    if judge_persona_alignment:
+        pass_rule += f" and persona_alignment_avg>={min_persona_alignment:.2f}"
     passed = (
         len(examples) >= max(3, min(6, max_cases))
         and agent_avg >= min_avg_similarity
         and delta >= min_delta_vs_baseline
+        and (not judge_persona_alignment or (persona_alignment_avg or 0.0) >= min_persona_alignment)
     )
-    return {
+    report = {
         "selection": "multi-answer-context-holdout-from-user-corpus",
         "test_cases": len(examples),
-        "metric": "max composite similarity (0.7 semantic + 0.3 style) to acceptable reply set per context",
+        "metric": "max composite similarity (0.78 semantic-style + 0.22 intent) to acceptable reply set per context",
+        "context_turns": context_turns,
+        "persona_alignment_metric": "LLM judge: value/stance + dialogue act + style naturalness + context continuity" if judge_persona_alignment else None,
         "agent_avg_similarity": agent_avg,
         "strict_avg_similarity_to_exact_holdout": strict_avg,
         "baseline_avg_similarity": baseline_avg,
         "delta_vs_baseline": delta,
+        "agent_intent_match_rate": intent_avg,
+        "baseline_intent_match_rate": baseline_intent_avg,
+        "delta_intent_vs_baseline": intent_delta,
         "pass_rule": pass_rule,
         "passed": passed,
         "examples": examples,
     }
+    if judge_persona_alignment:
+        report["persona_alignment_avg"] = persona_alignment_avg or 0.0
+    return report

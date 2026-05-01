@@ -15,6 +15,7 @@ SPEAKER_LINE_RE = re.compile(
 )
 MEDIA_PLACEHOLDER_RE = re.compile(r"^\[(图片|视频|文件|语音|卡片消息|表情).+\]$")
 REPLY_PREFIX_RE = re.compile(r"^\[回复 [^\]]+\]\s*")
+SUPPORTED_INPUT_SUFFIXES = {".json", ".csv", ".txt", ".md"}
 
 
 def detect_format(path: Path, declared: str) -> str:
@@ -28,6 +29,31 @@ def detect_format(path: Path, declared: str) -> str:
     if suffix == ".csv":
         return "csv"
     return "text"
+
+
+def iter_input_files(path: Path) -> list[Path]:
+    if path.is_file():
+        return [path]
+    if not path.is_dir():
+        raise FileNotFoundError(f"Input path not found: {path}")
+    files = [
+        candidate
+        for candidate in path.rglob("*")
+        if candidate.is_file()
+        and not candidate.name.startswith(".")
+        and candidate.suffix.lower() in SUPPORTED_INPUT_SUFFIXES
+    ]
+    return sorted(files)
+
+
+def _with_source_metadata(records: list[dict[str, Any]], source: Path) -> list[dict[str, Any]]:
+    enriched: list[dict[str, Any]] = []
+    for idx, record in enumerate(records):
+        row = dict(record)
+        row.setdefault("_source_path", str(source))
+        row.setdefault("_source_order", idx)
+        enriched.append(row)
+    return enriched
 
 
 def parse_timestamp(raw: str | int | float | None) -> datetime | None:
@@ -229,13 +255,19 @@ def _records_from_csv(path: Path) -> list[dict[str, Any]]:
 
 
 def parse_input(path: Path, fmt: str = "auto") -> list[dict[str, Any]]:
+    if path.is_dir():
+        records: list[dict[str, Any]] = []
+        for source in iter_input_files(path):
+            records.extend(parse_input(source, fmt))
+        return records
+
     resolved_format = detect_format(path, fmt)
     if resolved_format == "text":
-        return _records_from_text(path)
+        return _with_source_metadata(_records_from_text(path), path)
     if resolved_format == "json":
-        return _records_from_json(path)
+        return _with_source_metadata(_records_from_json(path), path)
     if resolved_format == "csv":
-        return _records_from_csv(path)
+        return _with_source_metadata(_records_from_csv(path), path)
     raise ValueError(f"Unsupported format: {resolved_format}")
 
 
@@ -246,6 +278,7 @@ def normalize_records(
     drop_media_placeholders: bool = True,
 ) -> list[CorpusItem]:
     items: list[CorpusItem] = []
+    seen_keys: set[tuple[str, str, str]] = set()
     source_label = source.name
     target = speaker_filter.strip() if speaker_filter else None
 
@@ -262,8 +295,19 @@ def normalize_records(
         if drop_media_placeholders and MEDIA_PLACEHOLDER_RE.match(content):
             continue
 
+        raw_mid = record.get("source_message_id")
+        if raw_mid is not None and str(raw_mid).strip():
+            dedup_key = (speaker, f"mid:{str(raw_mid).strip()}", content)
+        else:
+            ts = parse_timestamp(record.get("timestamp") if isinstance(record, dict) else None)
+            ts_key = ts.isoformat() if ts else f"idx:{idx}"
+            dedup_key = (speaker, ts_key, content)
+        if dedup_key in seen_keys:
+            continue
+        seen_keys.add(dedup_key)
+
         content_hash = stable_hash(content)
-        source_message_id = record.get("source_message_id")
+        source_message_id = raw_mid
         item = CorpusItem(
             id=stable_hash(f"{source_label}:{idx}:{speaker}:{source_message_id or content}", prefix="item"),
             source=source_label,
@@ -286,6 +330,19 @@ def ingest_file(
     speaker_filter: str | None = None,
     drop_media_placeholders: bool = True,
 ) -> list[CorpusItem]:
+    if path.is_dir():
+        items: list[CorpusItem] = []
+        for source in iter_input_files(path):
+            items.extend(
+                ingest_file(
+                    source,
+                    fmt=fmt,
+                    speaker_filter=speaker_filter,
+                    drop_media_placeholders=drop_media_placeholders,
+                )
+            )
+        return items
+
     records = parse_input(path, fmt)
     return normalize_records(
         path,

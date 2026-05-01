@@ -59,6 +59,7 @@ Canonical executor:
 ./tools/run_transform.sh <action> [options]
 ```
 
+
 Common options:
 
 - `--input <path>`: corpus file path
@@ -91,6 +92,7 @@ Examples:
 ./tools/run_transform.sh rollback --friend-id <friend_id> --to-version <version>
 ./tools/run_transform.sh export --friend-id <friend_id> --target both
 ./tools/run_transform.sh correct --friend-id <friend_id> --correction-text "少一点说教，多一点朋友口吻"
+
 ```
 
 ## MUST Rules
