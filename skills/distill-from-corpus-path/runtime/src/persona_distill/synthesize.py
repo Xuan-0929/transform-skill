@@ -6,9 +6,22 @@ from pathlib import Path
 
 import yaml
 
-from .models import CORE_SECTIONS, EvidenceClaim, PersonaProfile
+from .extract import (
+    _claim_anchor,
+    _claim_themes,
+    _decision_boundary,
+    _decision_rationale,
+    _dominant_theme,
+    _model_definition_from_cluster,
+    _model_filters_out,
+    _model_name_from_theme,
+    _model_reframes,
+    _model_sees_first,
+    _parse_rule_parts,
+)
+from .models import CORE_SECTIONS, DecisionRule, EvidenceClaim, EvidenceSpan, ModelCard, PersonaProfile
 from .providers import ModelProvider
-from .utils import canonical_skill_name, has_negation, safe_excerpt
+from .utils import canonical_skill_name, has_negation, safe_excerpt, stable_hash
 
 SECTION_TITLES = {
     "beliefs_and_values": "Beliefs & Values",
@@ -18,11 +31,164 @@ SECTION_TITLES = {
     "anti_patterns_and_limits": "Anti-Patterns & Limits",
 }
 
+MINIMUM_MENTAL_MODEL_CLAIMS = [
+    "先接住当前语境，再给出最小判断，不把回复写成报告。",
+    "表达时保留真实聊天节奏，口头禅服务于立场而不是替代思考。",
+]
+
+MINIMUM_DECISION_CLAIMS = [
+    "用户只是闲聊时，先自然接话，不主动展开教程。",
+    "遇到不确定信息时，先说明边界，再给最小可行动作。",
+    "有多人语境时，先锁定当前对象和话题，再回应。",
+    "出现新语料表达变化时，吸收语气但不覆盖旧人格底盘。",
+    "需要建议时，先给立场，再补理由，避免固定模板。",
+]
+
 
 def _first_evidence(claim: EvidenceClaim, fallback: str = "No direct evidence excerpt.") -> str:
     if not claim.evidence:
         return fallback
     return safe_excerpt(claim.evidence[0].excerpt, max_len=140)
+
+
+def _contract_evidence(profile: PersonaProfile) -> EvidenceSpan:
+    excerpt = next((x for x in profile.style_memory if x.strip()), "")
+    if not excerpt and profile.context_reply_memory:
+        pair = profile.context_reply_memory[0]
+        excerpt = pair.get("reply") or pair.get("context") or ""
+    if not excerpt:
+        excerpt = "冷启动语料信号不足，使用最低人格结构契约补齐。"
+    return EvidenceSpan(item_id="style_memory", start=0, end=0, excerpt=safe_excerpt(excerpt, 160))
+
+
+def _contract_claim(profile: PersonaProfile, section: str, text: str, idx: int) -> EvidenceClaim:
+    return EvidenceClaim(
+        id=stable_hash(f"{profile.persona_id}:{profile.version}:{section}:contract:{idx}:{text}", prefix="claim"),
+        section=section,
+        claim=text,
+        confidence=0.5,
+        evidence=[_contract_evidence(profile)],
+        tags=["minimum_contract"],
+    )
+
+
+def _ensure_minimum_claims(profile: PersonaProfile) -> None:
+    sections = dict(profile.sections)
+    mental_models = list(sections.get("mental_models", []))
+    decision_heuristics = list(sections.get("decision_heuristics", []))
+
+    existing_mental = {c.claim for c in mental_models}
+    for text in MINIMUM_MENTAL_MODEL_CLAIMS:
+        if len(mental_models) >= 2:
+            break
+        if text in existing_mental:
+            continue
+        mental_models.append(_contract_claim(profile, "mental_models", text, len(mental_models) + 1))
+        existing_mental.add(text)
+
+    existing_rules = {c.claim for c in decision_heuristics}
+    for text in MINIMUM_DECISION_CLAIMS:
+        if len(decision_heuristics) >= 5:
+            break
+        if text in existing_rules:
+            continue
+        decision_heuristics.append(
+            _contract_claim(profile, "decision_heuristics", text, len(decision_heuristics) + 1)
+        )
+        existing_rules.add(text)
+
+    sections["mental_models"] = mental_models
+    sections["decision_heuristics"] = decision_heuristics
+    profile.sections = sections
+
+
+def _model_card_from_claim(profile: PersonaProfile, claim: EvidenceClaim, idx: int) -> ModelCard:
+    theme = _dominant_theme([claim])
+    gates = {
+        "cross_context": len(claim.evidence) >= 1,
+        "generative": any(tok in claim.claim for tok in ("如果", "就", "先", "再", "因为", "所以", "语境", "判断")),
+        "exclusive": bool(_claim_themes(claim.claim)),
+    }
+    return ModelCard(
+        id=stable_hash(f"{profile.persona_id}:{profile.version}:model:contract:{claim.id}", prefix="model"),
+        name=_model_name_from_theme(theme, idx),
+        definition=_model_definition_from_cluster([claim], theme),
+        sees_first=_model_sees_first(theme),
+        filters_out=_model_filters_out(theme),
+        reframes=_model_reframes(theme),
+        evidence_anchors=[_claim_anchor(claim)],
+        failure_mode=_model_filters_out(theme),
+        gates=gates,
+        confidence=round(max(0.55, claim.confidence), 3),
+        source_claim_id=claim.id,
+    )
+
+
+def _ensure_minimum_model_cards(profile: PersonaProfile) -> None:
+    cards = list(profile.model_cards)
+    existing_sources = {card.source_claim_id for card in cards if card.source_claim_id}
+    for claim in profile.sections.get("mental_models", []):
+        if len(cards) >= 2:
+            break
+        if claim.id in existing_sources:
+            continue
+        cards.append(_model_card_from_claim(profile, claim, len(cards) + 1))
+        existing_sources.add(claim.id)
+    profile.model_cards = cards
+
+
+def _decision_rule_from_claim(profile: PersonaProfile, claim: EvidenceClaim, idx: int) -> DecisionRule:
+    condition, action = _parse_rule_parts(claim.claim)
+    return DecisionRule(
+        id=stable_hash(f"{profile.persona_id}:{profile.version}:rule:contract:{claim.id}", prefix="rule"),
+        rule=claim.claim,
+        condition=condition,
+        action=action,
+        rationale=_decision_rationale(claim.claim),
+        boundary=_decision_boundary(claim.claim),
+        evidence_anchor=_claim_anchor(claim),
+        confidence=round(max(0.5, claim.confidence), 3),
+    )
+
+
+def _ensure_minimum_decision_rules(profile: PersonaProfile) -> None:
+    rules = list(profile.decision_rules)
+    existing_rules = {rule.rule for rule in rules}
+    for claim in profile.sections.get("decision_heuristics", []):
+        if len(rules) >= 5:
+            break
+        if claim.claim in existing_rules:
+            continue
+        rules.append(_decision_rule_from_claim(profile, claim, len(rules) + 1))
+        existing_rules.add(claim.claim)
+    profile.decision_rules = rules
+
+
+def _ensure_known_answer_anchors(profile: PersonaProfile) -> None:
+    if profile.known_answer_anchors or not profile.context_reply_memory:
+        return
+    anchors: list[dict[str, str]] = []
+    for pair in profile.context_reply_memory[:3]:
+        context = (pair.get("context") or "").strip()
+        reply = (pair.get("reply") or "").strip()
+        if not context or not reply:
+            continue
+        anchors.append(
+            {
+                "question": safe_excerpt(context, 120),
+                "expected_direction": safe_excerpt(reply, 160),
+            }
+        )
+    profile.known_answer_anchors = anchors
+
+
+def ensure_minimum_persona_contract(profile: PersonaProfile) -> PersonaProfile:
+    """Make cold-start exports installable without exposing quarantine for thin corpora."""
+    _ensure_minimum_claims(profile)
+    _ensure_minimum_model_cards(profile)
+    _ensure_minimum_decision_rules(profile)
+    _ensure_known_answer_anchors(profile)
+    return profile
 
 
 def _title_from_claim(text: str, idx: int) -> str:
@@ -560,6 +726,8 @@ def render_skill_package(
     persona_name: str,
     skill_name: str | None = None,
 ) -> dict:
+    ensure_minimum_persona_contract(profile)
+
     resolved_skill_name = skill_name or canonical_skill_name(persona_name)
     output_dir.mkdir(parents=True, exist_ok=True)
     refs_dir = output_dir / "references"

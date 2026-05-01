@@ -103,3 +103,24 @@ def test_skill_markdown_contains_scene_examples(tmp_path: Path) -> None:
     assert "## 场景化原声示例" in skill_text
     assert "### 场景 1" in skill_text
     assert "- 别人说：晚上吃什么" in skill_text
+
+
+def test_render_skill_finalizes_minimum_persona_contract(tmp_path: Path) -> None:
+    from persona_distill.validation import run_validation
+
+    profile = _profile()
+    output_dir = tmp_path / "skill"
+    render_skill_package(
+        profile=profile,
+        output_dir=output_dir,
+        provider=_StubProvider(),
+        persona_name="friend-demo",
+    )
+
+    validation = run_validation(output_dir, profile, {"style_memory"})
+
+    assert validation.ok, validation.schema_errors + validation.consistency_errors
+    assert len(profile.model_cards) >= 2
+    assert len(profile.decision_rules) >= 5
+    skill_text = (output_dir / "SKILL.md").read_text(encoding="utf-8")
+    assert skill_text.count("### 模型") >= 2

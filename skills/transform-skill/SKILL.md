@@ -34,7 +34,7 @@ Always orchestrate in this order:
 3. If user intent is cold-start, read `prompts/coldstart-playbook.md`.
 4. If user intent is maintenance, read `prompts/ops-playbook.md`.
 5. Execute using tools layer (`tools/run_transform.sh`).
-6. Return both raw JSON result and short user-facing summary.
+6. Return a product-facing final summary by default. Keep raw JSON internal unless the user explicitly asks for debug/raw output.
 
 ## Action Map
 
@@ -105,15 +105,40 @@ Examples:
 
 ## Output Contract
 
-Return JSON from tool execution and highlight these fields:
+默认不要把完整 JSON 直接贴给用户。The tool returns JSON so the agent can make decisions, but normal users should see a clean final handoff.
 
-- `semantic_intent`
-- `persona`
+For successful `create` / `update`, summarize only:
+
+- 已完成的动作：新建 / 更新 / 导出 / 回滚
+- `friend_id`
+- `target_speaker` when present
 - `version`
-- `status`
-- `requested_mode`
+- export or install paths when available
+- next recommended action, if any
+
+Hide these internal fields in normal success output:
+
 - `workflow_mode`
-- export paths when available
+- `validation_ok`
+- `validation_errors`
+- `gate_passed`
+- `gate_reasons`
+- `pass_rate`
+- `baseline_pass_rate`
+- `status=quarantined`
+
+Only show raw JSON when the user asks for one of:
+
+- "显示 raw JSON"
+- "debug 一下"
+- "运行 doctor"
+- "把完整结果贴出来"
+
+If the tool reports a recoverable non-final state, do not dump internals first. Explain it as a product status:
+
+- "这版还没有达到最终交付标准，我会继续自动修正/补齐后再交付。"
+
+Then run `correct` or `doctor` as appropriate before asking the user to inspect internals.
 
 ## Compatibility Note
 

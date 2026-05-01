@@ -62,3 +62,11 @@ def test_run_transform_list(tmp_path: Path) -> None:
     assert payload["action"] == "list"
     assert payload["semantic_intent"] == "friend-list"
     assert payload["count"] == 0
+
+
+def test_transform_skill_entry_hides_raw_json_by_default() -> None:
+    skill_text = (ROOT / "skills" / "transform-skill" / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "Return both raw JSON" not in skill_text
+    assert "默认不要把完整 JSON" in skill_text
+    assert "debug" in skill_text.lower() or "doctor" in skill_text.lower()

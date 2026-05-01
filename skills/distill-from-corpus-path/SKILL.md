@@ -60,10 +60,13 @@ When appropriate, suggest moving to `/transform-skill` for:
 
 ## Output Contract
 
-Return JSON and highlight:
-- `semantic_intent`
-- `persona`
+默认不要把完整 JSON 直接贴给用户。This legacy entry should behave like `/transform-skill`: use JSON internally, then return a clean user-facing result.
+
+For normal success output, summarize only:
+- completed action
+- `friend_id` / persona id
+- `target_speaker` when present
 - `version`
-- `status`
-- `workflow_mode`
 - export paths when present
+
+Hide internal fields such as `workflow_mode`, `validation_ok`, `validation_errors`, `gate_passed`, and `quarantined` unless the user explicitly asks for raw/debug/doctor output.
